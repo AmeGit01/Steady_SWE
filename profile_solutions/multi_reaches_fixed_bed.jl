@@ -28,7 +28,6 @@ n_points_total = sum(n_points)                              # total number of po
 B_v = Array{Float64}(undef, n_points_total)                                  # temporary array for the widths
 KS  = Array{Float64}(undef, n_points_total)                               # temporary array for the Strickler coefficients
 IF  = Array{Float64}(undef, n_points_total)  
-# dX  = Array{Float64}(undef, n_points_total-1)                            # temporary array for the distances between the points
 
 dX = dx .* ones(n_points_total-1)                            # vector of distances between the points
 B_v[1:n_points[1]] = B[1] .* ones(n_points[1])                     # vector of widths, same length as X
@@ -38,8 +37,8 @@ for n_rea in 1:n_reaches-1
     location = sum(n_points[1:n_rea]) + 1                     # location of the first point of the next reach
     dX[location] = 0.0 # set the last distance to zero, to avoid problems in the integration
     B_v[n_points[n_rea]+1:n_points[n_rea+1]+n_points[n_rea]] = B[n_rea+1] .* ones(n_points[n_rea+1]) # vector of widths, same length as X
-    KS[n_points[n_rea]+1:n_points[n_rea+1]+n_points[n_rea]] = Ks[n_rea+1] .* ones(n_points[n_rea+1]) # vector of Strickler coefficients
-    IF[n_points[n_rea]+1:n_points[n_rea+1]+n_points[n_rea]] = iF[n_rea+1] .* ones(n_points[n_rea+1]) # vector of slopes
+    KS[sum(n_points[1:n_rea])+1 : sum(n_points[1:n_rea+1])] = Ks[n_rea+1] .* ones(n_points[n_rea+1]) # vector of Strickler coefficients
+    IF[sum(n_points[1:n_rea])+1 : sum(n_points[1:n_rea+1])] = iF[n_rea+1] .* ones(n_points[n_rea+1]) # vector of slopes
 end
 
 println("size B_v =  ", size(B_v), ", size KS = ", size(KS), ", size IF = ", size(IF), ", size dX = ", size(dX))
@@ -48,31 +47,49 @@ println("size B_v =  ", size(B_v), ", size KS = ", size(KS), ", size IF = ", siz
 pdx = scatter(dX, label="dX", xlabel="Point index", ylabel="dX [m]",
     title="Distance between the points", grid=true, color="black",
     xlims=(1, n_points_total), size=(1000, 400))
-display(pdx)    
+# display(pdx)    
 # savefig("pdx_plot.png")
 
 
 # auxiliary vector
-scale = zeros(n_reaches)                                    # scale vector for the z coordinates
+scale = zeros(n_reaches, 2)                                               # scale vector for the z coordinates
 for n_rea in n_reaches-1:-1:1
-    scale[n_rea] = scale[n_rea+1] + L[n_rea] * iF[n_rea]                    # scale vector for the z coordinates
+    scale[n_rea, 2] = scale[n_rea+1, 2] + L[n_rea+1] * iF[n_rea+1]        # scale vector for the z coordinates
 end
-println("Scale vector: ", scale)
+for n_rea in 2:n_reaches
+    scale[n_rea, 1] = scale[n_rea-1, 2] + L[n_rea-1]                        # scale vector for the z coordinates
+end
 
-X = Float64[]; Z = Float64[]                                # initialize the arrays for the x and z coordinates of the points
+println("Scale vector for X: ", scale[:, 1])
+println("Scale vector for Z: ", scale[:, 2])
+
+
+
+X = Array{Float64}(undef, n_points_total)                       # initialize the array for the x coordinates of the points
+Z = Array{Float64}(undef, n_points_total)                       # initialize the arrays for the x and z coordinates of the points
 for n_rea in 1:n_reaches
-    x = LinRange(0, L[n_rea], n_points[n_rea])                     # x coordinates of the points
-    z = zeros(n_points[n_rea])                              # initialize z coordinates of the points
-    build_bed!(z, x, dx, iF[n_rea], n_points[n_rea])        # build the bed of the channel
-    X = n_rea == 1 ? x : vcat(X, x)                             # append the x coordinates as it is
-    Z = n_rea == 1 ? z .+ scale[n_rea] : vcat(Z, z .+ scale[n_rea])             # append the z coordinates with the scale
+    x = LinRange(0, L[n_rea], n_points[n_rea])                  # x coordinates of the points
+    z = zeros(n_points[n_rea])                                  # initialize z coordinates of the points
+    build_bed!(z, x, dx, iF[n_rea], n_points[n_rea])            # build the bed of the channel
+    if n_rea == 1
+        X[1:n_points[n_rea]] = x .+ scale[n_rea, 1]                                                        # first reach, assign the x coordinates
+        Z[1:n_points[n_rea]] = z .+ scale[n_rea, 2]                                        # first reach, assign the z coordinates with the scale
+    else
+        X[sum(n_points[1:n_rea-1])+1 : sum(n_points[1:n_rea])] = x .+ scale[n_rea, 1]   # append the x coordinates
+        Z[sum(n_points[1:n_rea-1])+1 : sum(n_points[1:n_rea])] = z .+ scale[n_rea, 2]   # append the z coordinates with the scale
+    end
 end
 
 println("first and last x coordinates: ", X[1], " m, ", X[end], " m")
 println("first and last z coordinates: ", Z[1], " m, ", Z[end], " m")
 
-# --------------------- BOUNDARY CONDITIONS ------------------------
+pbed = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel",
+    grid=true, xlims=(X[begin]-10, X[end]+10), ylims=(minimum(Z)-0.05, maximum(Z)+0.05),
+    color="black", linewidth=2, size=(1000, 400))
+display(pbed)
 
+# --------------------- BOUNDARY CONDITIONS ------------------------
+#=
 # Evaluate the uniform and critical depths
 d_uniform, d_critical = zeros(n_reaches), zeros(n_reaches)    # initialize the vectors for the uniform and critical depths
 for n_rea in 1:n_reaches
@@ -118,7 +135,6 @@ for n in n_points_total-1:-1:1
 end
 println("Subcritical computation: Left upward Energy = ", e_dw[1], " m, Right upward Energy = ", e_dw[n_points_total], " m")
 
-#=
 # ------------------------- SPINTA EVALUATION -----------------------
 
 # evaluate the Spinta for both the supercritical and subcritical depths
@@ -153,4 +169,4 @@ p1 = plot!(X, Z + d, label="Water depth", xlabel="x [m]", ylabel="z [m]",
 p1 = plot!(X, Z + d_critical_vector, label="Critical depth", xlabel="x [m]", ylabel="z [m]",
     title="Water elevation in the channel", grid=true, color="gray", linewidth=2, linestyle=:dash)
 display(p1)
-=#
+=# 
