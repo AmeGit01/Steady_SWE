@@ -1,4 +1,5 @@
 using IJulia, Plots, Printf, Infiltrator 
+include("functions.jl")
 
 # ---------------------- PROBLEM DEFINITION -----------------------
 
@@ -13,33 +14,43 @@ g  = 9.81                   # gravity acceleration [m/s^2]
 
 # -------------------------- GEOMETRY -----------------------------
 
-# Check the lengths of the channel are multiple of dx
-
 n_points = Array{Int64}(undef, n_reaches)                                     # number of points in the channel
-B_v, KS, IF, dX = Float64[], Float64[], Float64[], Float64                # vector of widths, same length as X
 for n_rea in 1:n_reaches
+    # Check the lengths of the channel are multiple of dx
     L[n_rea] % dx ≠ 0 && error("The length of the channel must be a multiple of dx")
     n_points[n_rea] = Int(L[n_rea]/dx) + 1
-    println("Number of points along reach ", n_rea, ": ", n_points[n_rea])
-    B_v = n_rea == 1 ? B[n_rea] .* ones(n_points[n_rea]) : vcat(B_v, B[n_rea] .* ones(n_points[n_rea])) # vector of widths, same length as X
-    KS = n_rea == 1 ? Ks[n_rea] .* ones(n_points[n_rea]) : vcat(KS, Ks[n_rea] .* ones(n_points[n_rea])) # vector of Strickler coefficients
-    IF = n_rea == 1 ? iF[n_rea] .* ones(n_points[n_rea]) : vcat(IF, iF[n_rea] .* ones(n_points[n_rea])) # vector of slopes
-    dX = n_rea == 1 ? dx .* ones(n_points[n_rea]-1) : vcat(dX, dx .* ones(n_points[n_rea])) # vector of distances between the points
+    @printf("Number of points along reach %d: %d \n", n_rea, n_points[n_rea])
 end
-println("size B_v = ", size(B_v), ", size KS = ", size(KS), ", size IF = ", size(IF), ", size dX = ", size(dX))
 
+n_points_total = sum(n_points)                              # total number of points in the channel
+@printf("Total number of points in the channel: %d \n", n_points_total)
+
+B_v = Array{Float64}(undef, n_points_total)                                  # temporary array for the widths
+KS  = Array{Float64}(undef, n_points_total)                               # temporary array for the Strickler coefficients
+IF  = Array{Float64}(undef, n_points_total)  
+# dX  = Array{Float64}(undef, n_points_total-1)                            # temporary array for the distances between the points
+
+dX = dx .* ones(n_points_total-1)                            # vector of distances between the points
+B_v[1:n_points[1]] = B[1] .* ones(n_points[1])                     # vector of widths, same length as X
+KS[1:n_points[1]] = Ks[1] .* ones(n_points[1])                     # vector of Strickler coefficients
+IF[1:n_points[1]] = iF[1] .* ones(n_points[1])                     # vector of slopes
 for n_rea in 1:n_reaches-1
     location = sum(n_points[1:n_rea]) + 1                     # location of the first point of the next reach
     dX[location] = 0.0 # set the last distance to zero, to avoid problems in the integration
+    B_v[n_points[n_rea]+1:n_points[n_rea+1]+n_points[n_rea]] = B[n_rea+1] .* ones(n_points[n_rea+1]) # vector of widths, same length as X
+    KS[n_points[n_rea]+1:n_points[n_rea+1]+n_points[n_rea]] = Ks[n_rea+1] .* ones(n_points[n_rea+1]) # vector of Strickler coefficients
+    IF[n_points[n_rea]+1:n_points[n_rea+1]+n_points[n_rea]] = iF[n_rea+1] .* ones(n_points[n_rea+1]) # vector of slopes
 end
-n_points_total = sum(n_points)                              # total number of points in the channel
-println("Total number of points in the channel: ", n_points_total)
+
+println("size B_v =  ", size(B_v), ", size KS = ", size(KS), ", size IF = ", size(IF), ", size dX = ", size(dX))
 
 # Check the dX vector is corrected (must be present some zeros)
 pdx = scatter(dX, label="dX", xlabel="Point index", ylabel="dX [m]",
     title="Distance between the points", grid=true, color="black",
     xlims=(1, n_points_total), size=(1000, 400))
 display(pdx)    
+# savefig("pdx_plot.png")
+
 
 # auxiliary vector
 scale = zeros(n_reaches)                                    # scale vector for the z coordinates
