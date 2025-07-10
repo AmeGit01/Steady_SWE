@@ -89,15 +89,23 @@ pbed = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the
 display(pbed)
 
 # --------------------- BOUNDARY CONDITIONS ------------------------
-#=
+
 # Evaluate the uniform and critical depths
 d_uniform, d_critical = zeros(n_reaches), zeros(n_reaches)    # initialize the vectors for the uniform and critical depths
 for n_rea in 1:n_reaches
     d_uniform[n_rea], d_critical[n_rea] = evaluate_depths(Q, B[n_rea], L[n_rea], Ks[n_rea], iF[n_rea])    # evaluate the uniform and critical depths
     # append the critical depth vector
-    d_critical_vector = n_rea == 1 ? d_critical[n_rea] .* ones(n_points[n_rea]) : vcat(d_critical_vector, d_critical[n_rea] .* ones(n_points[n_rea])) 
     println("Reach ", n_rea, ": Uniform depth = ", d_uniform[n_rea], " m, Critical depth = ", d_critical[n_rea], " m")
 end
+
+# fill the critical depth vector with the values for each reach
+d_critical_vector = zeros(n_points_total)                     # initialize the vector for the critical depths
+d_critical_vector[1:n_points[1]] = d_critical[1] .* ones(n_points[1]) # first reach, assign the critical depth
+for n_rea in 2:n_reaches
+    d_critical_vector[sum(n_points[1:n_rea-1])+1 : sum(n_points[1:n_rea])] = d_critical[n_rea] .* ones(n_points[n_rea]) # append the critical depth
+end
+# d_critical_vector = n_rea == 1 ? d_critical[n_rea] .* ones(n_points[n_rea]) : vcat(d_critical_vector, d_critical[n_rea] .* ones(n_points[n_rea])) 
+
 
 # The BC are always the uniform flow depth:
 eL = d_uniform[begin] + Q^2 / (2 * g * (B[begin] * d_uniform[begin])^2) # water elevation at the left boundary [begin]
@@ -120,7 +128,7 @@ for n in 2:n_points_total
 end
 println("Supercritical computation: Left downward Energy = ", e_dw[1], " m, Right downward Energy = ", e_dw[n_points_total], " m")
 
-
+#=
 # Solve the energy equation from right to left (upward)
 e_uw = zeros(n_points_total); e_uw[end] = eR                    # energy E at the points of the channel + IC
 d_slow = zeros(n_points_total); d_slow[end] = d_uniform[end]    # depth from the upward energy + IC
