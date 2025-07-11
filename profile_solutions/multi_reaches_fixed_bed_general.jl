@@ -3,12 +3,12 @@ include("functions.jl")
 
 # ---------------------- PROBLEM DEFINITION -----------------------
 
-n_reaches = 2               # number of reaches in the channel
-L  = [1000.0, 2000.0]       # length of the channel [m]
+n_reaches = 3               # number of reaches in the channel
+L  = [1000.0, 2000.0, 1000.0]       # length of the channel [m]
 Q  = 100.0                  # discharge [m^3/s] Q = Ω Ks R^2/3 iF^1/2
-B  = [50.0, 50.0]           # width of the channel [m]
-Ks = [40.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
-iF = [0.01, 0.001]          # slope of the channel
+B  = [50.0, 50.0, 50.0]           # width of the channel [m]
+Ks = [40.0, 40.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
+iF = [0.01, 0.001, 0.0005]          # slope of the channel
 dx = 10.0                   # distance between the points of the channel [m]
 g  = 9.81                   # gravity acceleration [m/s^2]
 
@@ -36,7 +36,7 @@ IF[1:n_points[1]] = iF[1] .* ones(n_points[1])                     # vector of s
 for n_rea in 1:n_reaches-1
     location = sum(n_points[1:n_rea]) + 1                     # location of the first point of the next reach
     dX[location] = 0.0 # set the last distance to zero, to avoid problems in the integration
-    B_v[n_points[n_rea]+1:n_points[n_rea+1]+n_points[n_rea]] = B[n_rea+1] .* ones(n_points[n_rea+1]) # vector of widths, same length as X
+    B_v[sum(n_points[1:n_rea])+1: sum(n_points[1:n_rea+1])] = B[n_rea+1] .* ones(n_points[n_rea+1]) # vector of widths, same length as X
     KS[sum(n_points[1:n_rea])+1 : sum(n_points[1:n_rea+1])] = Ks[n_rea+1] .* ones(n_points[n_rea+1]) # vector of Strickler coefficients
     IF[sum(n_points[1:n_rea])+1 : sum(n_points[1:n_rea+1])] = iF[n_rea+1] .* ones(n_points[n_rea+1]) # vector of slopes
 end
@@ -129,13 +129,8 @@ for n in 2:n_points_total
         d_fast[n-1] = d_critical_vector[n-1] # set the depth to the critical depth
         break
     end
-    # Evaluate the hydraulic radius:
-    Rh = (B_v[n-1] * d_fast[n-1])/(2*d_fast[n-1] + B_v[n-1])
-    # Evaluate the Energy (forward explicit Euler)
-    # temp = - dX[n-1] * (IF[n-1] - (Q/(KS[n-1] * B_v[n-1] * d_fast[n-1]))^2 * Rh^(-4/3))
-    # e_dw[n] = e_dw[n-1] - dX[n-1] * (IF[n-1] - (Q/(KS[n-1] * B_v[n-1] * d_fast[n-1]))^2 * Rh^(-4/3))
     e_dw[n] = e_dw[n-1] + dX[n-1] * dEdx(IF[n-1], Q, B_v[n-1], d_fast[n-1], KS[n-1])
-    # Evaluate the depth from the energy])
+    # Evaluate the depth from the energy
     d_fast[n] = E2d(d_critical_vector[n], Q, B_v[n], e_dw[n], style="supercritical")
     @printf("n = %d, e_dw[n] = %f, d_fast[n] = %.4f, X[n] = %.2f \n", n, e_dw[n], d_fast[n], X[n])
 end
@@ -151,10 +146,9 @@ for n in n_points_total-1:-1:1
         d_slow[n+1] = d_critical_vector[n+1] # set the depth to the critical depth
         break
     end
-    # Evaluate the hydraulic radius:
-    Rh = (B_v[n+1] * d_slow[n+1])/(2*d_slow[n+1] + B_v[n+1])
     # Evaluate the Energy (forward explicit Euler)
     e_uw[n] = e_uw[n+1] - dX[n] * dEdx(IF[n+1], Q, B_v[n+1], d_slow[n+1], KS[n+1])
+    @infiltrate false
     d_slow[n] = E2d(d_critical_vector[n], Q, B_v[n], e_uw[n], style="subcritical")
     @printf("n = %d, e_uw[n] = %f, d_slow[n] = %.4f, X[n] = %.2f \n", n, e_uw[n], d_slow[n], X[n])
 end
@@ -165,19 +159,15 @@ println("Subcritical computation: Left upward Energy = ", e_uw[1], " m, Right up
 # evaluate the Spinta for both the supercritical and subcritical depths
 Spinta_fast = zeros(n_points_total)                   # Spinta for the supercritical depths  
 Spinta_slow = zeros(n_points_total)                   # Spinta for the subcritical depths
+d = zeros(n_points_total)                             # final depth to be plotted
 for n = 1:n_points_total
     Spinta_fast[n] = d_fast[n]==0 ? 0 : Spinta(Q, B_v[n], d_fast[n])    # Spinta for the supercritical depths
     Spinta_slow[n] = d_slow[n]==0 ? 0 : Spinta(Q, B_v[n], d_slow[n])    # Spinta for the subcritical depths
-end
-#println("Spinta for the supercritical depths: ", Spinta_fast[1], " N/m, with depth: ", d_fast[1], " m")
-#println("Spinta for the subcritical depths: ", Spinta_slow[1], " N/m, with depth: ", d_slow[1], " m")
-
-# Chose the depth with the maximum Spinta between the two:
-d = zeros(n_points_total)                              # final depth to be plotted
-for n = 1:n_points_total
     # use the supercritical depth if Spinta is greater, otherwise use the subcritical depth
     Spinta_fast[n] > Spinta_slow[n] ? d[n] = d_fast[n] : d[n] = d_slow[n] 
 end
+#println("Spinta for the supercritical depths: ", Spinta_fast[1], " N/m, with depth: ", d_fast[1], " m")
+#println("Spinta for the subcritical depths: ", Spinta_slow[1], " N/m, with depth: ", d_slow[1], " m")
 
 # --------------------------- PLOTS -----------------------------
 
