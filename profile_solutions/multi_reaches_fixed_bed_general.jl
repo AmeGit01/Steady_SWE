@@ -3,13 +3,13 @@ include("functions.jl")
 
 # ---------------------- PROBLEM DEFINITION -----------------------
 
-n_reaches = 3               # number of reaches in the channel
-L  = [1000.0, 2000.0, 1000.0]       # length of the channel [m]
+n_reaches = 4               # number of reaches in the channel
+L  = [2000.0, 2000.0, 2000.0, 2000.0]       # length of the channel [m]
 Q  = 100.0                  # discharge [m^3/s] Q = Ω Ks R^2/3 iF^1/2
-B  = [50.0, 50.0, 50.0]           # width of the channel [m]
-Ks = [40.0, 40.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
-iF = [0.01, 0.001, 0.0005]          # slope of the channel
-dx = 10.0                   # distance between the points of the channel [m]
+B  = [50.0, 50.0, 50.0, 50.0]           # width of the channel [m]
+Ks = [40.0, 40.0, 20.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
+iF = [0.001, 0.01, 0.01, 0.0005]          # slope of the channel
+dx = 1.0                   # distance between the points of the channel [m]
 g  = 9.81                   # gravity acceleration [m/s^2]
 
 # -------------------------- GEOMETRY -----------------------------
@@ -61,8 +61,6 @@ end
 println("Scale vector for X: ", scale[:, 1])
 println("Scale vector for Z: ", scale[:, 2])
 
-
-
 X = Array{Float64}(undef, n_points_total)                       # initialize the array for the x coordinates of the points
 Z = Array{Float64}(undef, n_points_total)                       # initialize the arrays for the x and z coordinates of the points
 for n_rea in 1:n_reaches
@@ -102,57 +100,115 @@ for n_rea in 1:n_reaches
     println("Reach ", n_rea, ": Uniform depth = ", d_uniform[n_rea], " m, Critical depth = ", d_critical[n_rea], " m")
 end
 
+# check wether the reaches are subcritical or supercritical
+subcritical = zeros(n_reaches) # initialize the vector for the subcritical reaches
+for n_rea in 1:n_reaches
+    if d_uniform[n_rea] > d_critical[n_rea]
+        subcritical[n_rea] = 1 # subcritical reach
+        println("Reach ", n_rea, " is subcritical")
+    else
+        subcritical[n_rea] = 0 # supercritical reach
+        println("Reach ", n_rea, " is supercritical")
+    end
+end
+
 # fill the critical depth vector with the values for each reach
 d_critical_vector = zeros(n_points_total)                     # initialize the vector for the critical depths
 d_critical_vector[1:n_points[1]] = d_critical[1] .* ones(n_points[1]) # first reach, assign the critical depth
 for n_rea in 2:n_reaches
     d_critical_vector[sum(n_points[1:n_rea-1])+1 : sum(n_points[1:n_rea])] = d_critical[n_rea] .* ones(n_points[n_rea]) # append the critical depth
 end
-# d_critical_vector = n_rea == 1 ? d_critical[n_rea] .* ones(n_points[n_rea]) : vcat(d_critical_vector, d_critical[n_rea] .* ones(n_points[n_rea])) 
 
-
+# evaluate the BC for each reach (considered separately), so that to impose them
+# internally where requested
 # The BC are always the uniform flow depth:
-eL = d_uniform[begin] + Q^2 / (2 * g * (B[begin] * d_uniform[begin])^2) # water elevation at the left boundary [begin]
-eR = d_uniform[end] + Q^2 / (2 * g * (B[end] * d_uniform[end])^2) # water elevation at the left boundary [end]
-println("Left E BC = ", eL, " m, Right E BC = ", eR, " m")
+EL = zeros(n_reaches); dL = zeros(n_reaches) # left boundary condition for the energy
+ER = zeros(n_reaches); dR = zeros(n_reaches) # right boundary condition for the energy
+EL[1]         = Energy(Q, B[1],         d_uniform[1],         g); 
+dL[1]         = d_uniform[1]  # water elevation at the left boundary [m]
+ER[n_reaches] = Energy(Q, B[n_reaches], d_uniform[n_reaches], g); 
+dR[n_reaches] = d_uniform[n_reaches] # water elevation at the right boundary [m]
+for n_rea in 2:n_reaches-1
+    discriminant = subcritical[n_rea] - subcritical[n_rea-1] # check if the reach is subcritical or supercritical
+    if discriminant == 0 || discriminant == +1
+        EL[n_rea]   = Energy(Q, B[n_rea], d_uniform[n_rea], g);     dL[n_rea]   = d_uniform[n_rea] # if the reach is subcritical, use the uniform depth
+        ER[n_rea-1] = Energy(Q, B[n_rea-1], d_uniform[n_rea-1], g); dR[n_rea-1] = d_uniform[n_rea]
+    elseif discriminant == -1
+        EL[n_rea]   = Energy(Q, B[n_rea], d_critical[n_rea], g);     dL[n_rea]   = d_critical[n_rea] # if the reach is supercritical, use the critical depth
+        ER[n_rea-1] = Energy(Q, B[n_rea-1], d_critical[n_rea-1], g); dR[n_rea-1] = d_critical[n_rea-1] # if the previous reach is supercritical, use the critical depth
+    else
+        error("Discriminant must be either 0, -1, or 1")
+    end
+end
+# The two EL and ER are the same for the same reach, but it's clearer to have them separated
+for n_rea in 1:n_reaches
+    println("Reach ", n_rea, ": Left E BC = ", EL[n_rea], " m, Right E BC = ", ER[n_rea], " m")
+end 
 
 # ------------------------- INTEGRATION ----------------------------- 
 # NB: here we have to solve for E and immediately evaluate the depths from the energy
 
-
 # Solve the energy equation from left to right (downward)
-e_dw = zeros(n_points_total); e_dw[1] = eL                      # energy E at the points of the channel + IC
-d_fast = zeros(n_points_total); d_fast[1] = d_uniform[begin]    # depth from the downward energy + IC
-for n in 2:n_points_total
-    if d_fast[n-1] == 0.0
-        @printf("Warning: d_fast[%d] = %.2f m, set to critical: d_fast[%d] = %.3f m \nBreaking the supercritical computation  \n", n-1, d_fast[n-1], n-1, d_critical_vector[n-1])
-        d_fast[n-1] = d_critical_vector[n-1] # set the depth to the critical depth
-        break
+# here we have to solve the supercritical reaches, starting from the left boundary and
+# going on until reaching the critical state
+e_dw   = zeros(n_points_total)
+d_fast = zeros(n_points_total) # depth from the downward energy
+for n_rea in 1:n_reaches
+    if subcritical[n_rea] == 1
+        @printf("Reach %d is subcritical, skipping the supercritical computation \n", n_rea)
+        continue # skip the supercritical computation for subcritical reaches
     end
-    e_dw[n] = e_dw[n-1] + dX[n-1] * dEdx(IF[n-1], Q, B_v[n-1], d_fast[n-1], KS[n-1])
-    # Evaluate the depth from the energy
-    d_fast[n] = E2d(d_critical_vector[n], Q, B_v[n], e_dw[n], style="supercritical")
-    @printf("n = %d, e_dw[n] = %f, d_fast[n] = %.4f, X[n] = %.2f \n", n, e_dw[n], d_fast[n], X[n])
+    n = n_rea==1 ? 1 : sum(n_points[1:n_rea-1])+1 # starting point for the reach
+
+    # skip the computation if the reach is supercritical and the previous one was supercritical too
+    if n_rea>1 && (subcritical[n_rea-1] == 0 && subcritical[n_rea] == 0); continue; end 
+    e_dw[n] = EL[n_rea]
+    d_fast[n] = dL[n_rea]
+
+    while n ≤ n_points_total
+        n += 1
+        if d_fast[n-1] == 0.0
+            @printf("Warning: d_fast[%d] = %.2f m, set to critical: d_fast[%d] = %.3f m \nBreaking the supercritical computation  \n", n-1, d_fast[n-1], n-1, d_critical_vector[n-1])
+            d_fast[n-1] = d_critical_vector[n-1] # set the depth to the critical depth
+            break
+        end
+        e_dw[n] = e_dw[n-1] + dX[n-1] * dEdx(IF[n-1], Q, B_v[n-1], d_fast[n-1], KS[n-1])
+        # Evaluate the depth from the energy
+        d_fast[n] = E2d(d_critical_vector[n], Q, B_v[n], e_dw[n], style="supercritical")
+        # @printf("n = %d, e_dw[n] = %f, d_fast[n] = %.4f, X[n] = %.2f \n", n, e_dw[n], d_fast[n], X[n])
+    end
 end
 println("Supercritical computation: Left downward Energy = ", e_dw[1], " m, Right downward Energy = ", e_dw[n_points_total], " m")
 
-
 # Solve the energy equation from right to left (upward)
-e_uw = zeros(n_points_total); e_uw[end] = eR                    # energy E at the points of the channel + IC
-d_slow = zeros(n_points_total); d_slow[end] = d_uniform[end]    # depth from the upward energy + IC
-for n in n_points_total-1:-1:1
-    if d_slow[n+1] == 0.0
-        @printf("Warning: d_slow[%d] = %.2f m, set it to critical: d_slow[%d] = %.3f m \nbreaking the subcritical computation  \n", n+1, d_slow[n+1], n+1, d_critical_vector[n+1])
-        d_slow[n+1] = d_critical_vector[n+1] # set the depth to the critical depth
-        break
+# here we have to solve the subcritical reaches, starting from the right boundary and
+# going on until reaching the critical state
+
+e_uw   = zeros(n_points_total) 
+d_slow = zeros(n_points_total) 
+for n_rea in n_reaches:-1:1
+    if subcritical[n_rea] == 0
+        @printf("Reach %d is supercritical, skipping the subcritical computation \n", n_rea)
+        continue # skip the supercritical computation for subcritical reaches
     end
-    # Evaluate the Energy (forward explicit Euler)
-    e_uw[n] = e_uw[n+1] - dX[n] * dEdx(IF[n+1], Q, B_v[n+1], d_slow[n+1], KS[n+1])
-    @infiltrate false
-    d_slow[n] = E2d(d_critical_vector[n], Q, B_v[n], e_uw[n], style="subcritical")
-    @printf("n = %d, e_uw[n] = %f, d_slow[n] = %.4f, X[n] = %.2f \n", n, e_uw[n], d_slow[n], X[n])
+    n = n_rea==1 ? n_points[n_rea] : sum(n_points[1:n_rea])
+    if n_rea < n_reaches && (subcritical[n_rea+1] == 1 && subcritical[n_rea] == 1); continue; end 
+    e_uw[n] = ER[n_rea]
+    d_slow[n] = dR[n_rea] # initial guess for the depth
+    while n > 1
+        n -= 1
+        if d_slow[n+1] == 0.0
+            @printf("Warning: d_slow[%d] = %.2f m, set it to critical: d_slow[%d] = %.3f m \nbreaking the subcritical computation  \n", n+1, d_slow[n+1], n+1, d_critical_vector[n+1])
+            d_slow[n+1] = d_critical_vector[n+1] # set the depth to the critical depth
+            break
+        end
+        # Evaluate the Energy (forward explicit Euler)
+        e_uw[n] = e_uw[n+1] - dX[n] * dEdx(IF[n+1], Q, B_v[n+1], d_slow[n+1], KS[n+1])
+        @infiltrate false
+        d_slow[n] = E2d(d_critical_vector[n], Q, B_v[n], e_uw[n], style="subcritical")
+        # @printf("n = %d, e_uw[n] = %f, d_slow[n] = %.4f, X[n] = %.2f \n", n, e_uw[n], d_slow[n], X[n])
+    end
 end
-println("Subcritical computation: Left upward Energy = ", e_uw[1], " m, Right upward Energy = ", e_uw[n_points_total], " m")
 
 # ------------------------- SPINTA EVALUATION -----------------------
 
@@ -171,7 +227,7 @@ end
 
 # --------------------------- PLOTS -----------------------------
 
-y_limits = (min(minimum(Z), minimum(e_dw)) - 0.05, max(maximum(Z), maximum(Z+e_dw)) + 0.05)
+y_limits = (min(minimum(Z), minimum(e_dw)) - 0.5, max(maximum(Z), maximum(Z+d)) + 0.5) # y limits for the plots
 p1 = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel", legend=:topright,
     grid=true, xlims=(X[begin]-10, X[end]+10), ylims=y_limits, color="black", linewidth=2,
     size=(1400, 700))
@@ -185,7 +241,7 @@ p1 = plot!(X, Z + d_critical_vector, label="Critical depth", xlabel="x [m]", yla
     title="Water elevation in the channel", grid=true, color="gray", linewidth=2, linestyle=:dash)
 
 p2 = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel", legend=:topright,
-    grid=true, xlims=(900, 1050), ylims=(Z[100]-2, Z[100]+d_slow[100]+1), color="black", linewidth=2,
+    grid=true, xlims=(900, 1050), ylims=(Z[100]-1.2, Z[100]+d_slow[100]+2), color="black", linewidth=2,
     size=(1400, 700))
 p2 = plot!(X, Z + d_fast, label="Supercritical depths", xlabel="x [m]", ylabel="z [m]",
     title="Water elevation in the channel", grid=true, color="red", linewidth=2)
