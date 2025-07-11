@@ -9,7 +9,7 @@ Q  = 100.0                  # discharge [m^3/s] Q = Ω Ks R^2/3 iF^1/2
 B  = [50.0, 50.0]           # width of the channel [m]
 Ks = [40.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
 iF = [0.01, 0.001]          # slope of the channel
-dx = 1.0                    # distance between the points of the channel [m]
+dx = 10.0                   # distance between the points of the channel [m]
 g  = 9.81                   # gravity acceleration [m/s^2]
 
 # -------------------------- GEOMETRY -----------------------------
@@ -46,18 +46,16 @@ println("size B_v =  ", size(B_v), ", size KS = ", size(KS), ", size IF = ", siz
 # Check the dX vector is corrected (must be present some zeros)
 pdx = scatter(dX, label="dX", xlabel="Point index", ylabel="dX [m]",
     title="Distance between the points", grid=true, color="black",
-    xlims=(1, n_points_total), size=(1000, 400))
-# display(pdx)    
+    xlims=(1, n_points_total), size=(1000, 400)); # display(pdx)    
 # savefig("pdx_plot.png")
 
-
-# auxiliary vector
-scale = zeros(n_reaches, 2)                                               # scale vector for the z coordinates
+# auxiliary vectors
+scale = zeros(n_reaches, 2)
 for n_rea in n_reaches-1:-1:1
     scale[n_rea, 2] = scale[n_rea+1, 2] + L[n_rea+1] * iF[n_rea+1]        # scale vector for the z coordinates
 end
 for n_rea in 2:n_reaches
-    scale[n_rea, 1] = scale[n_rea-1, 2] + L[n_rea-1]                        # scale vector for the z coordinates
+    scale[n_rea, 1] = scale[n_rea-1, 1] + L[n_rea-1]                      # scale vector for the x coordinates
 end
 
 println("Scale vector for X: ", scale[:, 1])
@@ -85,8 +83,14 @@ println("first and last z coordinates: ", Z[1], " m, ", Z[end], " m")
 
 pbed = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel",
     grid=true, xlims=(X[begin]-10, X[end]+10), ylims=(minimum(Z)-0.05, maximum(Z)+0.05),
-    color="black", linewidth=2, size=(1000, 400))
-display(pbed)
+    color="black", linewidth=2, size=(1000, 400)); # display(pbed)
+
+
+px   = plot(X, label="X coordinates", xlabel="Point index", ylabel="X [m]",
+    title="X coordinates of the points", grid=true, color="blue",
+    xlims=(1, n_points_total), size=(1000, 400))
+# display(plot(pbed, px, layout=(2,1), size=(1000, 800), legend=:topright)) 
+
 
 # --------------------- BOUNDARY CONDITIONS ------------------------
 
@@ -115,33 +119,46 @@ println("Left E BC = ", eL, " m, Right E BC = ", eR, " m")
 # ------------------------- INTEGRATION ----------------------------- HERE THERE IS A PROBLEM
 # NB: here we have to solve for E and immediately evaluate the depths from the energy
 
+
 # Solve the energy equation from left to right (downward)
 e_dw = zeros(n_points_total); e_dw[1] = eL                      # energy E at the points of the channel + IC
 d_fast = zeros(n_points_total); d_fast[1] = d_uniform[begin]    # depth from the downward energy + IC
 for n in 2:n_points_total
+    if d_fast[n-1] == 0.0
+        @printf("Warning: d_fast[%d] = %.2f m, set to critical: d_fast[%d] = %.3f m \nBreaking the supercritical computation  \n", n-1, d_fast[n-1], n-1, d_critical_vector[n-1])
+        d_fast[n-1] = d_critical_vector[n-1] # set the depth to the critical depth
+        break
+    end
     # Evaluate the hydraulic radius:
     Rh = (B_v[n-1] * d_fast[n-1])/(2*d_fast[n-1] + B_v[n-1])
     # Evaluate the Energy (forward explicit Euler)
-    temp = - dX[n-1] * (IF[n-1] - (Q/(KS[n-1] * B_v[n-1] * d_fast[n-1]))^2 * Rh^(-4/3))
-    e_dw[n] = e_dw[n-1] + temp
+    # temp = - dX[n-1] * (IF[n-1] - (Q/(KS[n-1] * B_v[n-1] * d_fast[n-1]))^2 * Rh^(-4/3))
+    # e_dw[n] = e_dw[n-1] - dX[n-1] * (IF[n-1] - (Q/(KS[n-1] * B_v[n-1] * d_fast[n-1]))^2 * Rh^(-4/3))
+    e_dw[n] = e_dw[n-1] + dX[n-1] * dEdx(IF[n-1], Q, B_v[n-1], d_fast[n-1], KS[n-1])
+    # Evaluate the depth from the energy])
     d_fast[n] = E2d(d_critical_vector[n], Q, B_v[n], e_dw[n], style="supercritical")
+    @printf("n = %d, e_dw[n] = %f, d_fast[n] = %.4f, X[n] = %.2f \n", n, e_dw[n], d_fast[n], X[n])
 end
 println("Supercritical computation: Left downward Energy = ", e_dw[1], " m, Right downward Energy = ", e_dw[n_points_total], " m")
 
-#=
+
 # Solve the energy equation from right to left (upward)
 e_uw = zeros(n_points_total); e_uw[end] = eR                    # energy E at the points of the channel + IC
 d_slow = zeros(n_points_total); d_slow[end] = d_uniform[end]    # depth from the upward energy + IC
 for n in n_points_total-1:-1:1
+    if d_slow[n+1] == 0.0
+        @printf("Warning: d_slow[%d] = %.2f m, set it to critical: d_slow[%d] = %.3f m \nbreaking the subcritical computation  \n", n+1, d_slow[n+1], n+1, d_critical_vector[n+1])
+        d_slow[n+1] = d_critical_vector[n+1] # set the depth to the critical depth
+        break
+    end
     # Evaluate the hydraulic radius:
     Rh = (B_v[n+1] * d_slow[n+1])/(2*d_slow[n+1] + B_v[n+1])
     # Evaluate the Energy (forward explicit Euler)
-    temp = - dX[n] * (IF[n+1] - (Q/(KS[n+1] * B_v[n+1] * d_slow[n+1]))^2 * Rh^(-4/3))
-    e_uw[n] = e_uw[n+1] + temp
+    e_uw[n] = e_uw[n+1] - dX[n] * dEdx(IF[n+1], Q, B_v[n+1], d_slow[n+1], KS[n+1])
     d_slow[n] = E2d(d_critical_vector[n], Q, B_v[n], e_uw[n], style="subcritical")
-    println("n = ", n)
+    @printf("n = %d, e_uw[n] = %f, d_slow[n] = %.4f, X[n] = %.2f \n", n, e_uw[n], d_slow[n], X[n])
 end
-println("Subcritical computation: Left upward Energy = ", e_dw[1], " m, Right upward Energy = ", e_dw[n_points_total], " m")
+println("Subcritical computation: Left upward Energy = ", e_uw[1], " m, Right upward Energy = ", e_uw[n_points_total], " m")
 
 # ------------------------- SPINTA EVALUATION -----------------------
 
@@ -149,8 +166,8 @@ println("Subcritical computation: Left upward Energy = ", e_dw[1], " m, Right up
 Spinta_fast = zeros(n_points_total)                   # Spinta for the supercritical depths  
 Spinta_slow = zeros(n_points_total)                   # Spinta for the subcritical depths
 for n = 1:n_points_total
-    Spinta_fast[n] = Spinta(Q, B_v[n], d_fast[n])    # Spinta for the supercritical depths
-    Spinta_slow[n] = Spinta(Q, B_v[n], d_slow[n])    # Spinta for the subcritical depths
+    Spinta_fast[n] = d_fast[n]==0 ? 0 : Spinta(Q, B_v[n], d_fast[n])    # Spinta for the supercritical depths
+    Spinta_slow[n] = d_slow[n]==0 ? 0 : Spinta(Q, B_v[n], d_slow[n])    # Spinta for the subcritical depths
 end
 #println("Spinta for the supercritical depths: ", Spinta_fast[1], " N/m, with depth: ", d_fast[1], " m")
 #println("Spinta for the subcritical depths: ", Spinta_slow[1], " N/m, with depth: ", d_slow[1], " m")
@@ -167,7 +184,7 @@ end
 y_limits = (min(minimum(Z), minimum(e_dw)) - 0.05, max(maximum(Z), maximum(Z+e_dw)) + 0.05)
 p1 = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel", legend=:topright,
     grid=true, xlims=(X[begin]-10, X[end]+10), ylims=y_limits, color="black", linewidth=2,
-    size=(1400, 400))
+    size=(1400, 700))
 p1 = plot!(X, Z + d_fast, label="Supercritical depths", xlabel="x [m]", ylabel="z [m]",
     title="Water elevation in the channel", grid=true, color="red", linewidth=2)
 p1 = plot!(X, Z + d_slow, label="Subcritical depths", xlabel="x [m]", ylabel="z [m]",
@@ -176,5 +193,18 @@ p1 = plot!(X, Z + d, label="Water depth", xlabel="x [m]", ylabel="z [m]",
     title="Water elevation in the channel", grid=true, color="green", linewidth=2)
 p1 = plot!(X, Z + d_critical_vector, label="Critical depth", xlabel="x [m]", ylabel="z [m]",
     title="Water elevation in the channel", grid=true, color="gray", linewidth=2, linestyle=:dash)
-display(p1)
-=# 
+
+p2 = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel", legend=:topright,
+    grid=true, xlims=(900, 1050), ylims=(Z[100]-2, Z[100]+d_slow[100]+1), color="black", linewidth=2,
+    size=(1400, 700))
+p2 = plot!(X, Z + d_fast, label="Supercritical depths", xlabel="x [m]", ylabel="z [m]",
+    title="Water elevation in the channel", grid=true, color="red", linewidth=2)
+p2 = plot!(X, Z + d_slow, label="Subcritical depths", xlabel="x [m]", ylabel="z [m]",
+    title="Water elevation in the channel", grid=true, color="blue", linewidth=2)
+p2 = plot!(X, Z + d, label="Water depth", xlabel="x [m]", ylabel="z [m]",
+    title="Water elevation in the channel", grid=true, color="green", linewidth=2)
+p2 = plot!(X, Z + d_critical_vector, label="Critical depth", xlabel="x [m]", ylabel="z [m]",
+    title="Water elevation in the channel", grid=true, color="gray", linewidth=2, linestyle=:dash)
+
+display(plot(p1, p2, layout=(2,1), size=(1400, 800)))
+

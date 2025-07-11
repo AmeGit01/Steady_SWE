@@ -62,9 +62,14 @@ end
                 end
                 d = (dL + dR) / 2.0; f = Energy(Q, B, d, g)
                 res = goal - f
+                n += 1
+                if n > max_iter
+                    return d = 0.0
+                end
             end
         elseif (style=="supercritical")
             while abs(res) ≥ 1.e-6
+                @infiltrate false
                 if res < 0
                     dL = d; fL = f;
                 else
@@ -72,6 +77,10 @@ end
                 end
                 d = (dL + dR) / 2.0; f = Energy(Q, B, d, g)
                 res = goal - f
+                n += 1
+                if n > max_iter
+                    return d = 0.0
+                end
             end
         end
     end
@@ -133,3 +142,5 @@ end
 
 Spinta(Q, B, d) = 500*9.81*B*d^2 + 1000*Q^2/(B*d)
 Energy(Q, B, d, g) = d + Q^2/(2*g*(B*d)^2)
+Hyd_radius(B, d) = (B*d)/(2*d + B)
+dEdx(iF, Q, B, d, Ks) = iF - ( Q^2 / (Ks^2 * B^2 * d^2) * ( (B*d) / (2*d+B) )^(-4/3) )
