@@ -1,5 +1,5 @@
 using IJulia, Plots, Printf, Infiltrator 
-include("functions.jl")
+include("fun_opt.jl")
 
 # ---------------------- PROBLEM DEFINITION -----------------------
 
@@ -66,7 +66,7 @@ Z = Array{Float64}(undef, n_points_total)                       # initialize the
 for n_rea in 1:n_reaches
     x = LinRange(0, L[n_rea], n_points[n_rea])                  # x coordinates of the points
     z = zeros(n_points[n_rea])                                  # initialize z coordinates of the points
-    build_bed!(z, x, dx, iF[n_rea], n_points[n_rea])            # build the bed of the channel
+    build_bed!(z, x, iF[n_rea], n_points[n_rea])            # build the bed of the channel
     if n_rea == 1
         X[1:n_points[n_rea]] = x .+ scale[n_rea, 1]                                                        # first reach, assign the x coordinates
         Z[1:n_points[n_rea]] = z .+ scale[n_rea, 2]                                        # first reach, assign the z coordinates with the scale
@@ -95,7 +95,7 @@ px   = plot(X, label="X coordinates", xlabel="Point index", ylabel="X [m]",
 # Evaluate the uniform and critical depths
 d_uniform, d_critical = zeros(n_reaches), zeros(n_reaches)    # initialize the vectors for the uniform and critical depths
 for n_rea in 1:n_reaches
-    d_uniform[n_rea], d_critical[n_rea] = evaluate_depths(Q, B[n_rea], L[n_rea], Ks[n_rea], iF[n_rea])    # evaluate the uniform and critical depths
+    d_uniform[n_rea], d_critical[n_rea] = evaluate_depths(Q, B[n_rea], Ks[n_rea], iF[n_rea])    # evaluate the uniform and critical depths
     # append the critical depth vector
     println("Reach ", n_rea, ": Uniform depth = ", d_uniform[n_rea], " m, Critical depth = ", d_critical[n_rea], " m")
 end
@@ -176,8 +176,8 @@ for n_rea in 1:n_reaches
         end
         e_dw[n] = e_dw[n-1] + dX[n-1] * dEdx(IF[n-1], Q, B_v[n-1], d_fast[n-1], KS[n-1])
         # Evaluate the depth from the energy
-        # d_fast[n] = E2d(d_critical_vector[n], Q, B_v[n], e_dw[n], style="supercritical")
-        d_fast[n] = analitical_E2d(d_critical_vector[n], e_dw[n], Q, B_v[n], g, n, style="supercritical")
+        # d_fast[n] = E2d(d_criical_vector[n], Q, B_v[n], e_dw[n], style="supercritical")
+        d_fast[n] = analytical_E2d(d_critical_vector[n], e_dw[n], Q, B_v[n], g, n, style="supercritical")
         # @printf("n = %d, e_dw[n] = %f, d_fast[n] = %.4f, X[n] = %.2f \n", n, e_dw[n], d_fast[n], X[n])
     end
 end
@@ -208,7 +208,7 @@ for n_rea in n_reaches:-1:1
         # Evaluate the Energy (forward explicit Euler)
         e_uw[n] = e_uw[n+1] - dX[n] * dEdx(IF[n+1], Q, B_v[n+1], d_slow[n+1], KS[n+1])
         # d_slow[n] = E2d(d_critical_vector[n], Q, B_v[n], e_uw[n], style="subcritical")
-        d_slow[n] = analitical_E2d(d_critical_vector[n], e_uw[n], Q, B_v[n], g, n, style="subcritical")
+        d_slow[n] = analytical_E2d(d_critical_vector[n], e_uw[n], Q, B_v[n], g, n, style="subcritical")
         # @printf("n = %d, e_uw[n] = %f, d_slow[n] = %.4f, X[n] = %.2f \n", n, e_uw[n], d_slow[n], X[n])
     end
 end
