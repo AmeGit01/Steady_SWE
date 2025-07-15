@@ -1,6 +1,6 @@
 using IJulia, Plots, Printf, Infiltrator 
 include("fun_opt.jl")
-
+GC.gc()
 # ---------------------- PROBLEM DEFINITION -----------------------
 
 n_reaches = 3               # number of reaches in the channel
@@ -31,13 +31,13 @@ for n_rea in 1:n_reaches-1
     dX[location] = 0.0                                  # set the last distance to zero, to avoid problems in the integration
 end
 
-B_v1 = Float64[]                                        # vector of widths
-KS1  = Float64[]                                        # vector of Strickler coefficients
-IF1  = Float64[]                                        # vector of slopes
+B_v = Float64[]                                        # vector of widths
+# KS  = Float64[]                                        # vector of Strickler coefficients
+# IF  = Float64[]                                        # vector of slopes
 for n_rea in 1:n_reaches
-    append!(B_v1, B[n_rea].*ones(n_points[n_rea]))      # vector of widths
-    append!(KS1, Ks[n_rea].*ones(n_points[n_rea]))      # vector of Strickler coefficients
-    append!(IF1, iF[n_rea].*ones(n_points[n_rea]))      # vector of slopes
+    append!(B_v, B[n_rea].*ones(n_points[n_rea]))      # vector of widths
+    # append!(KS, Ks[n_rea].*ones(n_points[n_rea]))      # vector of Strickler coefficients
+    # append!(IF, iF[n_rea].*ones(n_points[n_rea]))      # vector of slopes
 end
 
 println("size B_v =  ", size(B_v1), ", size KS = ", size(KS1), ", size IF = ", size(IF1), ", size dX = ", size(dX))
