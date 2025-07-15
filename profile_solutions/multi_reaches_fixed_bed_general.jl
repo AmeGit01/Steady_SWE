@@ -3,12 +3,12 @@ include("functions.jl")
 
 # ---------------------- PROBLEM DEFINITION -----------------------
 
-n_reaches = 2               # number of reaches in the channel
-L  = [1000.0, 2000.0]       # length of the channel [m]
+n_reaches = 3               # number of reaches in the channel
+L  = [1000.0, 2000.0, 1000.0]       # length of the channel [m]
 Q  = 100.0                  # discharge [m^3/s] Q = Ω Ks R^2/3 iF^1/2
-B  = [50.0, 50.0]           # width of the channel [m]
-Ks = [40.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
-iF = [0.05, 0.0001]          # slope of the channel
+B  = [50.0, 50.0, 50.0]           # width of the channel [m]
+Ks = [40.0, 40.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
+iF = [0.05, 0.0005, 0.01]          # slope of the channel
 dx = 1.0                   # distance between the points of the channel [m]
 g  = 9.81                   # gravity acceleration [m/s^2]
 

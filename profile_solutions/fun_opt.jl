@@ -58,7 +58,7 @@ end
     Γ0 = E/Ec                                       # Dimensionless energy
    
     if Γ0 ≤ 1.0                                     # control E ≥ Ec
-        η = 0.0                                     # if not, d = 0.0
+        η = 1.0                                     # if not, d = d_criical
     else
         α  = atan(sqrt(Γ0^3 - 1))                   # coefficient
         if style == "supercritical"
