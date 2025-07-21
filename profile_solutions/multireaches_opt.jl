@@ -2,18 +2,14 @@ using IJulia, Plots, Printf, Infiltrator
 include("fun_opt.jl")
 GC.gc()
 
-# ---------------------- PROBLEM DEFINITION -----------------------
-n_reaches = 3               # number of reaches in the channel
-L  = [1000.0, 2000.0, 1000.0]       # length of the channel [m]
-Q  = 100.0                  # discharge [m^3/s] Q = Ω Ks R^2/3 iF^1/2
-B  = [50.0, 50.0, 50.0]           # width of the channel [m]
-Ks = [40.0, 40.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
-iF = [0.05, 0.0005, 0.01]          # slope of the channel
-dx = 1.0                   # distance between the points of the channel [m]
-g  = 9.81                   # gravity acceleration [m/s^2]
+# --------------------- PARAMETERS DEFINITION ---------------------
+const PARAMETERS = (
+    gravit = 9.81,
+    useless = 1.0
+)
 
 
-@views function main_E_solver(L, Q, B, Ks, iF, dx)
+function bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx)
     n_reaches = length(L)
     # -------------------------- GEOMETRY -----------------------------
 
@@ -34,9 +30,7 @@ g  = 9.81                   # gravity acceleration [m/s^2]
         dX[location] = 0.0                                  # set the last distance to zero, to avoid problems in the integration
     end
 
-    B_v = Float64[]                                        # vector of widths
-    KS  = Float64[]                                        # vector of Strickler coefficients
-    IF  = Float64[]                                        # vector of slopes
+
     for n_rea in 1:n_reaches
         append!(B_v, B[n_rea].*ones(n_points[n_rea]))      # vector of widths
         append!(KS, Ks[n_rea].*ones(n_points[n_rea]))      # vector of Strickler coefficients
@@ -63,8 +57,6 @@ g  = 9.81                   # gravity acceleration [m/s^2]
     println("Scale vector for X: ", scale[:, 1])
     println("Scale vector for Z: ", scale[:, 2])
 
-    X = Float64[]
-    Z = Float64[]
     for n_rea in 1:n_reaches
         x = LinRange(0, L[n_rea], n_points[n_rea])                  # x coordinates of the points
         z = zeros(n_points[n_rea])                                  # initialize z coordinates of the points
@@ -78,70 +70,87 @@ g  = 9.81                   # gravity acceleration [m/s^2]
 
     pbed = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel",
         grid=true, xlims=(X[begin]-10, X[end]+10), ylims=(minimum(Z)-0.05, maximum(Z)+0.05),
-        color="black", linewidth=2, size=(1000, 400)); # display(pbed)
+        color="black", linewidth=2, size=(1000, 400)); #display(pbed)
 
 
     px   = plot(X, label="X coordinates", xlabel="Point index", ylabel="X [m]",
         title="X coordinates of the points", grid=true, color="blue",
         xlims=(1, n_points_total), size=(1000, 400))
     # display(plot(pbed, px, layout=(2,1), size=(1000, 800), legend=:topright)) 
+    return dX, n_points_total
+end # bed_construction
 
+
+@views function main_E_solver(Q, N, B_v, KS, IF)
+
+    # I have to make the code working also for changing bed elevation, so the 
+    # "position" of the reaches can change, i.e. the position of the passage 
+    # through the critical state change avery time, so the code must be able to 
+    # recognize itself where and how many they are. 
+
+    # The only thing that remain constant for all the simulation is the 
+    # total number of points (N) and the X coordinate (and dX vector), so I have to 
+    # refer to them for doing all the work.
 
     # --------------------- BOUNDARY CONDITIONS ------------------------
+    g = PARAMETERS.gravit
 
-    # Evaluate the uniform and critical depths
-    d_uniform, d_critical = zeros(n_reaches), zeros(n_reaches)    # initialize the vectors for the uniform and critical depths
-    for n_rea in 1:n_reaches
-        du, dc = evaluate_depths(Q, B[n_rea], Ks[n_rea], iF[n_rea])    # evaluate the uniform and critical depths
-        d_uniform[n_rea] = du
-        d_critical[n_rea] = dc
-        # append the critical depth vector
-        println("Reach ", n_rea, ": Uniform depth = ", d_uniform[n_rea], " m, Critical depth = ", d_critical[n_rea], " m")
-    end
+    # vectorial version
+    d_uniform = d_critical = zeros(N)
+    d_uniform, d_critical = evaluate_depths(Q, B_v, KS, IF)
+
+    @printf("Critical depth = %.3f m \n", d_critical[Int(floor(N/2))])
 
     # check wether the reaches are subcritical or supercritical
-    subcritical = zeros(n_reaches) # initialize the vector for the subcritical reaches
-    for n_rea in 1:n_reaches
-        if d_uniform[n_rea] > d_critical[n_rea]
-            subcritical[n_rea] = 1 # subcritical reach
-            println("Reach ", n_rea, " is subcritical")
-        else
-            subcritical[n_rea] = 0 # supercritical reach
-            println("Reach ", n_rea, " is supercritical")
+    subcritical = zeros(N)              # vector describing wether the reach is subcritical or supercritical
+    n_changes = 0                       # counter for the changes in style
+    ch_loc = Int64[]                    # location of the changes, needed for the BC
+    for n ∈ 1:N
+        if d_uniform[n] > d_critical[n]
+            subcritical[n] = 1
+        else 
+            subcritical[n] = 0
         end
+        # count and print the number of changes in style
+        if n>1 && subcritical[n] ≠ subcritical[n-1]
+            n_changes += 1
+            append!(ch_loc, n)
+        end 
     end
+    n_reaches = n_changes + 1
+    @printf("Number of style changes is %d so there are %d reaches. \n", n_changes, n_reaches)
 
-    # fill the critical depth vector with the values for each reach
-    d_critical_vector = Float64[]
-    for n_rea in 1:n_reaches
-        append!(d_critical_vector, d_critical[n_rea] .* ones(n_points[n_rea]))
-    end
 
     # evaluate the BC for each reach (considered separately), so that to impose them internally where requested
     EL = zeros(n_reaches); dL = zeros(n_reaches) # left boundary condition for the energy
     ER = zeros(n_reaches); dR = zeros(n_reaches) # right boundary condition for the energy
-    EL[1]         = Energy(Q, B[1],         d_uniform[1],         g); 
+
+    EL[1]         = Energy(Q, B_v[1],         d_uniform[1],         g); 
     dL[1]         = d_uniform[1]  # water elevation at the left boundary [m]
-    ER[n_reaches] = Energy(Q, B[n_reaches], d_uniform[n_reaches], g); 
-    dR[n_reaches] = d_uniform[n_reaches] # water elevation at the right boundary [m]
-    for n_rea in 2:n_reaches
+
+    ER[n_reaches] = Energy(Q, B_v[end], d_uniform[end], g); 
+    dR[n_reaches] = d_uniform[end] # water elevation at the right boundary [m]
+
+    m = 2
+    for n_rea in ch_loc
         discriminant = subcritical[n_rea] - subcritical[n_rea-1] # check if the reach is subcritical or supercritical
         if discriminant == 0 || discriminant == +1
-            EL[n_rea]   = Energy(Q, B[n_rea], d_uniform[n_rea], g);     dL[n_rea]   = d_uniform[n_rea] # if the reach is subcritical, use the uniform depth
-            ER[n_rea-1] = Energy(Q, B[n_rea-1], d_uniform[n_rea-1], g); dR[n_rea-1] = d_uniform[n_rea]
+            EL[m]   = Energy(Q, B_v[n_rea],   d_uniform[n_rea],   g); dL[m]   = d_uniform[n_rea] # if the reach is subcritical, use the uniform depth
+            ER[m-1] = Energy(Q, B_v[n_rea-1], d_uniform[n_rea-1], g); dR[m-1] = d_uniform[n_rea]
         elseif discriminant == -1
-            EL[n_rea]   = Energy(Q, B[n_rea], d_critical[n_rea], g);     dL[n_rea]   = d_critical[n_rea] # if the reach is supercritical, use the critical depth
-            ER[n_rea-1] = Energy(Q, B[n_rea-1], d_critical[n_rea-1], g); dR[n_rea-1] = d_critical[n_rea-1] # if the previous reach is supercritical, use the critical depth
+            EL[m]   = Energy(Q, B_v[n_rea],   d_critical[n_rea], g);   dL[m]   = d_critical[n_rea] # if the reach is supercritical, use the critical depth
+            ER[m-1] = Energy(Q, B_v[n_rea-1], d_critical[n_rea-1], g); dR[m-1] = d_critical[n_rea-1] # if the previous reach is supercritical, use the critical depth
         else
             error("Discriminant must be either 0, -1, or 1")
         end
+        m += 1
     end
 
     # Print the BC for checking purposes
     for n_rea in 1:n_reaches
         @printf("Reach %d: Left E BC = %.4f m, Right E BC = %.4f m \n", n_rea, EL[n_rea], ER[n_rea])
+        @printf("Reach %d: Left d BC = %.4f m, Right d BC = %.4f m \n", n_rea, dL[n_rea], dR[n_rea])
     end 
-
 
     # ------------------------- INTEGRATION ----------------------------- 
     # NB: here we have to solve for E and immediately evaluate the depths from the energy
@@ -149,33 +158,53 @@ g  = 9.81                   # gravity acceleration [m/s^2]
     # Solve the energy equation from left to right (downward)
     # here we have to solve the supercritical reaches, starting from the left boundary and
     # going on until reaching the critical state
-    e_dw   = zeros(n_points_total)
-    d_fast = zeros(n_points_total) # depth from the downward energy
-    for n_rea in 1:n_reaches
+    e_dw   = zeros(N)
+    d_fast = zeros(N) # depth from the downward energy
+    ch_loc_dw = ch_loc
+    insert!(ch_loc_dw, 1, 1)
+    for n_rea ∈ ch_loc_dw
+        # check the reach is supercritical
         if subcritical[n_rea] == 1
             @printf("Reach %d is subcritical, skipping the supercritical computation \n", n_rea)
             continue # skip the supercritical computation for subcritical reaches
+        elseif n_rea>1 && (subcritical[n_rea-1] == 0 && subcritical[n_rea] == 0)
+            continue # skip the computation if the reach is supercritical and the previous one was supercritical too
         else
             @printf("Supercritical computation for reach %d \n", n_rea)
         end
-        n = n_rea==1 ? 1 : sum(n_points[1:n_rea-1])+1 # starting point for the reach
 
-        # skip the computation if the reach is supercritical and the previous one was supercritical too
-        if n_rea>1 && (subcritical[n_rea-1] == 0 && subcritical[n_rea] == 0); continue; end 
+        # set the beginning of the reach
+        n = n_rea
         e_dw[n] = EL[n_rea]
         d_fast[n] = dL[n_rea]
         @printf("Imposed BC: depth = %.4f m,  energy = %.4f m \n", d_fast[n], e_dw[n])
 
-        while n < n_points_total
+        while n < N # evaluate energy for downstream points
             n += 1
+            # Forward Euler
             e_dw[n] = e_dw[n-1] + dX[n-1] * dEdx(IF[n-1], Q, B_v[n-1], d_fast[n-1], KS[n-1])
-            d_fast[n] = analytical_E2d(d_critical_vector[n], e_dw[n], Q, B_v[n], g, n, style="supercritical")
+            # evaluate uniform depth (supercritical)
+            d_fast[n] = analytical_E2d(d_critical[n], e_dw[n], Q, B_v[n], style="supercritical")
+            # when the criticality is reached, than stop the evaluation:
+            d_fast[n]==d_critical[n] && break
 
             # @printf("n = %d, e_dw[n] = %f, d_fast[n] = %.4f, X[n] = %.2f \n", n, e_dw[n], d_fast[n], X[n])
         end
     end
-    println("Supercritical computation: Left downward Energy = ", e_dw[1], " m, Right downward Energy = ", e_dw[n_points_total], " m")
 
+    y_limits = (min(minimum(Z), minimum(e_dw)) - 0.5, max(maximum(Z), maximum(Z+d_fast)) + 0.5) # y limits for the plots
+    p1 = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel", legend=:topright,
+        grid=true, xlims=(X[begin]-10, X[end]+10), ylims=y_limits, color="black", linewidth=2,
+        size=(1400, 700))
+    p1 = plot!(X, Z + d_fast, label="Supercritical depths", xlabel="x [m]", ylabel="z [m]",
+        title="Water elevation in the channel", grid=true, color="red", linewidth=2)
+    p1 = plot!(X, Z + d_critical, label="Critical depth", xlabel="x [m]", ylabel="z [m]",
+        title="Water elevation in the channel", grid=true, color="gray", linewidth=2, linestyle=:dash)
+    display(plot(p1, size=(1400, 500)))
+
+    @infiltrate # UP TO HERE WORKS
+
+    
     # Solve the energy equation from right to left (upward)
     # here we have to solve the subcritical reaches, starting from the right boundary and
     # going on until reaching the critical state
@@ -195,7 +224,7 @@ g  = 9.81                   # gravity acceleration [m/s^2]
         while n > 1
             n -= 1
             e_uw[n] = e_uw[n+1] - dX[n] * dEdx(IF[n+1], Q, B_v[n+1], d_slow[n+1], KS[n+1])
-            d_slow[n] = analytical_E2d(d_critical_vector[n], e_uw[n], Q, B_v[n], g, n, style="subcritical")
+            d_slow[n] = analytical_E2d(d_critical[n], e_uw[n], Q, B_v[n], style="subcritical")
 
             # @printf("n = %d, e_uw[n] = %f, d_slow[n] = %.4f, X[n] = %.2f \n", n, e_uw[n], d_slow[n], X[n])
         end
@@ -228,11 +257,13 @@ g  = 9.81                   # gravity acceleration [m/s^2]
         title="Water elevation in the channel", grid=true, color="blue", linewidth=2)
     p1 = plot!(X, Z + d, label="Water depth", xlabel="x [m]", ylabel="z [m]",
         title="Water elevation in the channel", grid=true, color="green", linewidth=2)
-    p1 = plot!(X, Z + d_critical_vector, label="Critical depth", xlabel="x [m]", ylabel="z [m]",
+    p1 = plot!(X, Z + d_critical, label="Critical depth", xlabel="x [m]", ylabel="z [m]",
         title="Water elevation in the channel", grid=true, color="gray", linewidth=2, linestyle=:dash)
+    display(plot(p1, size=(1400, 500)))
 
+    #=
     p2 = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel", legend=:topright,
-        grid=true, xlims=(900, 1050), ylims=(Z[1000]-1, Z[1000]+d_slow[100]+4), color="black", linewidth=2,
+        grid=true, xlims=(950, 3050), ylims=(Z[3000]-1, Z[1000]+d_slow[100]+2), color="black", linewidth=2,
         size=(1400, 700))
     p2 = plot!(X, Z + d_fast, label="Supercritical depths", xlabel="x [m]", ylabel="z [m]",
         title="Water elevation in the channel", grid=true, color="red", linewidth=2)
@@ -240,11 +271,32 @@ g  = 9.81                   # gravity acceleration [m/s^2]
         title="Water elevation in the channel", grid=true, color="blue", linewidth=2)
     p2 = plot!(X, Z + d, label="Water depth", xlabel="x [m]", ylabel="z [m]",
         title="Water elevation in the channel", grid=true, color="green", linewidth=2)
-    p2 = plot!(X, Z + d_critical_vector, label="Critical depth", xlabel="x [m]", ylabel="z [m]",
+    p2 = plot!(X, Z + d_critical, label="Critical depth", xlabel="x [m]", ylabel="z [m]",
         title="Water elevation in the channel", grid=true, color="gray", linewidth=2, linestyle=:dash)
-
-    display(plot(p1, p2, layout=(2,1), size=(1400, 800)))
+    =#
+    # display(plot(p1, p2, layout=(2,1), size=(1400, 800)))
+    
     return nothing
 end #main_E_solver
 
-main_E_solver(L, Q, B, Ks, iF, dx)
+
+# ---------------------- PROBLEM DEFINITION -----------------------
+n_reaches = 3               # number of reaches in the channel
+L  = [2000.0]       # length of the channel [m]
+Q  = 100.0                  # discharge [m^3/s] Q = Ω Ks R^2/3 iF^1/2
+B  = [50.0]           # width of the channel [m]
+Ks = [40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
+iF = [0.01]          # slope of the channel
+dx = 1.0                   # distance between the points of the channel [m]
+g  = PARAMETERS.gravit             # gravity acceleration [m/s^2]
+
+B_v = Float64[]                                        # vector of widths
+KS  = Float64[]                                        # vector of Strickler coefficients
+IF  = Float64[]                                        # vector of slopes
+X   = Float64[]
+Z   = Float64[]
+dX  = Float64[]
+
+dX, N = bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx)
+
+main_E_solver(Q, N, B_v, KS, IF)
