@@ -31,12 +31,13 @@ end
         Qnew = 0.0;                                 # initialize discharge
         d = 1.0;                                    # initial guess for the depth [m]
         initial_res = Q - Q_formula(B[n], d, Ks[n], iF[n])   # save the initial residual
-        max_iter = 1000                             # maximum number of iterations
+        max_iter = 10000                             # maximum number of iterations
         m = 0                                       # iteration counter
         tol = 1.0e-5; res = 0.1                     # tolerance and iniatalize the residual
         while abs(res) ≥ tol 
             Qnew = Q_formula(B[n], d, Ks[n], iF[n]); res = Q - Qnew;     # evaluate discharghe with the new d
-            increment = res/initial_res*0.1;                    # increment toward the solution
+            @infiltrate false
+            increment = res/initial_res*0.01;                    # increment toward the solution
             if res > 0          # the depth is too small
                 d += increment; # increase the depth
             else                # the depth is too high
@@ -46,6 +47,7 @@ end
             if m > max_iter                                     # control condition (avoid infinite cicle)
                 error("Maximum number of iterations reached")
             end
+            # @printf("iter = %d \n", m)
         end
         c = Critical_d(Q, B[n])                                    # evaluate the critical depth
 
@@ -89,7 +91,7 @@ end
     g  = PARAMETERS.gravit 
     Ec = Energy(Q, B, d_critical, g)                # Calculate critical energy (minimum)
     Γ0 = E/Ec                                       # Dimensionless energy
-   
+    @infiltrate false
     if Γ0 ≤ 1.0                                     # control E ≥ Ec
         η = 1.0                                     # if not, d = d_criical
     else

@@ -1,4 +1,4 @@
-using IJulia, Plots, Printf, Infiltrator 
+using IJulia, Plots, Printf, Infiltrator, Revise
 include("fun_opt.jl")
 GC.gc()
 
@@ -160,9 +160,11 @@ end # bed_construction
     # going on until reaching the critical state
     e_dw   = zeros(N)
     d_fast = zeros(N) # depth from the downward energy
-    ch_loc_dw = ch_loc
+    ch_loc_dw = copy(ch_loc)
     insert!(ch_loc_dw, 1, 1)
+    m = 0
     for n_rea ∈ ch_loc_dw
+        m += 1 
         # check the reach is supercritical
         if subcritical[n_rea] == 1
             @printf("Reach %d is subcritical, skipping the supercritical computation \n", n_rea)
@@ -170,13 +172,13 @@ end # bed_construction
         elseif n_rea>1 && (subcritical[n_rea-1] == 0 && subcritical[n_rea] == 0)
             continue # skip the computation if the reach is supercritical and the previous one was supercritical too
         else
-            @printf("Supercritical computation for reach %d \n", n_rea)
+            @printf("Supercritical computation for reach %d \n", m)
         end
 
         # set the beginning of the reach
-        n = n_rea
-        e_dw[n] = EL[n_rea]
-        d_fast[n] = dL[n_rea]
+        n = n_rea + 1
+        e_dw[n] = EL[m]
+        d_fast[n] = dL[m]
         @printf("Imposed BC: depth = %.4f m,  energy = %.4f m \n", d_fast[n], e_dw[n])
 
         while n < N # evaluate energy for downstream points
@@ -186,7 +188,8 @@ end # bed_construction
             # evaluate uniform depth (supercritical)
             d_fast[n] = analytical_E2d(d_critical[n], e_dw[n], Q, B_v[n], style="supercritical")
             # when the criticality is reached, than stop the evaluation:
-            d_fast[n]==d_critical[n] && break
+            @infiltrate false
+            d_fast[n] == d_critical[n] && break
 
             # @printf("n = %d, e_dw[n] = %f, d_fast[n] = %.4f, X[n] = %.2f \n", n, e_dw[n], d_fast[n], X[n])
         end
@@ -202,29 +205,43 @@ end # bed_construction
         title="Water elevation in the channel", grid=true, color="gray", linewidth=2, linestyle=:dash)
     display(plot(p1, size=(1400, 500)))
 
-    @infiltrate # UP TO HERE WORKS
 
-    
     # Solve the energy equation from right to left (upward)
     # here we have to solve the subcritical reaches, starting from the right boundary and
     # going on until reaching the critical state
-    e_uw   = zeros(n_points_total) 
-    d_slow = zeros(n_points_total) 
-    for n_rea in n_reaches:-1:1
+    e_uw   = zeros(N) 
+    d_slow = zeros(N) 
+    ch_loc_uw = copy(ch_loc)
+    append!(ch_loc_uw, N+1)
+    ch_loc_uw .-= 1
+    reverse!(ch_loc_uw)
+    m = length(ch_loc_uw)+1
+    for n_rea ∈ ch_loc_uw
+        m -= 1
+        # check the reach is subcritical
         if subcritical[n_rea] == 0
             @printf("Reach %d is supercritical, skipping the subcritical computation \n", n_rea)
             continue # skip the supercritical computation for subcritical reaches
+        elseif n_rea < N && (subcritical[n_rea+1] == 1 && subcritical[n_rea] == 1)
+            continue
         else
-            @printf("Subcritical computation for reach %d \n", n_rea)
+            @printf("Subcritical computation for reach %d \n", m)
         end
-        n = n_rea==1 ? n_points[n_rea] : sum(n_points[1:n_rea])
-        if n_rea < n_reaches && (subcritical[n_rea+1] == 1 && subcritical[n_rea] == 1); continue; end 
-        e_uw[n] = ER[n_rea]
-        d_slow[n] = dR[n_rea] # initial guess for the depth
+
+        # set the end of the reach
+        n = n_rea
+        e_uw[n] = ER[m]
+        d_slow[n] = dR[m] # initial guess for the depth
+        @printf("Imposed BC: depth = %.4f m,  energy = %.4f m \n", d_slow[n], e_uw[n])
+
         while n > 1
             n -= 1
+            # Forward Euler (from dowstream to upstream)
             e_uw[n] = e_uw[n+1] - dX[n] * dEdx(IF[n+1], Q, B_v[n+1], d_slow[n+1], KS[n+1])
+            # evaluate uniform depth (subcritical)
             d_slow[n] = analytical_E2d(d_critical[n], e_uw[n], Q, B_v[n], style="subcritical")
+            # when the criticality is reached, than stop the evaluation:
+            d_slow[n] == d_critical[n] && break
 
             # @printf("n = %d, e_uw[n] = %f, d_slow[n] = %.4f, X[n] = %.2f \n", n, e_uw[n], d_slow[n], X[n])
         end
@@ -233,10 +250,10 @@ end # bed_construction
     # ------------------------- SPINTA EVALUATION -----------------------
 
     # evaluate the Spinta for both the supercritical and subcritical depths
-    Spinta_fast = zeros(n_points_total)                   # Spinta for the supercritical depths  
-    Spinta_slow = zeros(n_points_total)                   # Spinta for the subcritical depths
-    d = zeros(n_points_total)                             # final depth to be plotted
-    for n = 1:n_points_total
+    Spinta_fast = zeros(N)                   # Spinta for the supercritical depths  
+    Spinta_slow = zeros(N)                   # Spinta for the subcritical depths
+    d           = zeros(N)                   # final depth to be plotted
+    for n = 1:N
         Spinta_fast[n] = d_fast[n]==0 ? 0 : Spinta(Q, B_v[n], d_fast[n])    # Spinta for the supercritical depths
         Spinta_slow[n] = d_slow[n]==0 ? 0 : Spinta(Q, B_v[n], d_slow[n])    # Spinta for the subcritical depths
         # use the supercritical depth if Spinta is greater, otherwise use the subcritical depth
@@ -282,11 +299,11 @@ end #main_E_solver
 
 # ---------------------- PROBLEM DEFINITION -----------------------
 n_reaches = 3               # number of reaches in the channel
-L  = [2000.0]       # length of the channel [m]
-Q  = 100.0                  # discharge [m^3/s] Q = Ω Ks R^2/3 iF^1/2
-B  = [50.0]           # width of the channel [m]
-Ks = [40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
-iF = [0.01]          # slope of the channel
+L  = [500.0, 1000.0, 8000.0, 500.0]       # length of the channel [m]
+Q  = 60.0                  # discharge [m^3/s] Q = Ω Ks R^2/3 iF^1/2
+B  = [50.0, 50.0, 50.0, 50.0]           # width of the channel [m]
+Ks = [40.0, 40.0, 50.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
+iF = [0.001, 0.01, 0.0001, 0.001]          # slope of the channel
 dx = 1.0                   # distance between the points of the channel [m]
 g  = PARAMETERS.gravit             # gravity acceleration [m/s^2]
 
