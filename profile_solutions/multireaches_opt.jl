@@ -1,4 +1,4 @@
-using IJulia, Plots, Printf, Infiltrator, Revise
+using IJulia, Plots, Printf, Infiltrator, Revise, Test
 include("fun_opt.jl")
 GC.gc()
 
@@ -314,6 +314,31 @@ X   = Float64[]
 Z   = Float64[]
 dX  = Float64[]
 
-dX, N = bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx)
+# dX, N = bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx)
 
-main_E_solver(Q, N, B_v, KS, IF)
+# main_E_solver(Q, N, B_v, KS, IF)
+
+# test the bisection function:
+Q  = [20.0, 50.0, 100.0, 200.0]
+B  = [10.0, 10.0, 50.0, 50.0]
+Ks = [20.0, 20.0, 30.0, 40.0]
+iF = [0.01, 0.001, 0.01, 0.001]
+
+d = c = zeros(4)
+solutions = []
+
+for i ∈ 1:4
+    d, c = evaluate_depths(Q[i], B[i], Ks[i], iF[i])
+    @printf("i = %d, uniform = .5f, critical = .5f \n", i, d, c)
+    append!(solutions[i, 1], d)
+    append!(solutions[i, 2], c)
+end
+
+#=
+@testset "evaluate_depths_new" begin
+    @test evaluate_depths_new(goal[1], B[1], Ks[1], iF[1]) ≈ Test_results[1,:]
+    @test evaluate_depths_new(goal[2], B[2], Ks[2], iF[2]) ≈ Test_results[2,:]
+    @test evaluate_depths_new(goal[3], B[3], Ks[3], iF[3]) ≈ Test_results[3,:]
+    @test evaluate_depths_new(goal[4], B[4], Ks[4], iF[4]) ≈ Test_results[4,:]
+end
+=#

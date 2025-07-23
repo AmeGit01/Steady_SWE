@@ -23,6 +23,31 @@
     return d, c
 end 
 
+@views function evaluate_depths_new(goal::Float64, B::Float64, Ks::Float64, iF::Float64)
+    # same as before but using bisection method (convergence guaranteed)
+    dL = 0.01; dR = 10; d = 0.5*(dL+dR) # meters
+    QL = Q_formula(B, dL, Ks, iF); δQL = QL - goal
+    QR = Q_formula(B, dR, Ks, iF); δQR = QR - goal
+    if (δQL * δQR > 0) # check the initialization
+        error("Increase the initial range of depths (bisection)")
+    end
+    Q  = Q_formula(B, d,  Ks, iF); res = goal - Q;
+    max_iter = 100; tol = 1.e-5; n = 0
+    while abs(res) > tol
+        n > max_iter && error("Maximum number of iterations reached (bisection)")
+        n += 1
+        if (res > 0)  # Q is too small, d must increase
+            dL = d; QL = Q
+        else
+            dR = d; QR = Q
+        end
+        d = 0.5*(dL+dR); Q = Q_formula(B, d, Ks, iF)
+        res = goal - Q
+    end
+    c = Critical_d(Q, B) 
+    return d, c
+end
+
 @views function evaluate_depths(Q::Float64, B::Vector{Float64}, Ks::Vector{Float64}, iF::Vector{Float64})
     N = length(IF)
     d_vec = Float64[]; c_vec = Float64[]
