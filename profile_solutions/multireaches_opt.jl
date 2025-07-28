@@ -95,6 +95,7 @@ end # bed_construction
     # --------------------- BOUNDARY CONDITIONS ------------------------
     g = PARAMETERS.gravit
 
+    @infiltrate false
     # vectorial version
     d_uniform = d_critical = zeros(N)
     d_uniform, d_critical = evaluate_depths(Q, B_v, KS, IF)
@@ -118,6 +119,7 @@ end # bed_construction
         end 
     end
     n_reaches = n_changes + 1
+    @infiltrate false
     @printf("Number of style changes is %d so there are %d reaches. \n", n_changes, n_reaches)
 
 
@@ -314,32 +316,8 @@ X   = Float64[]
 Z   = Float64[]
 dX  = Float64[]
 
-# dX, N = bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx)
+dX, N = bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx)
 
-# main_E_solver(Q, N, B_v, KS, IF)
+main_E_solver(Q, N, B_v, KS, IF)
 
-# test the bisection function:
-Q  = [20.0, 50.0, 100.0, 200.0]
-B  = [10.0, 10.0, 50.0, 50.0]
-Ks = [20.0, 20.0, 30.0, 40.0]
-iF = [0.01, 0.001, 0.01, 0.001]
-
-# d = c = zeros(4)
-d_solutions = Float64[]
-c_solutions = Float64[]
-
-for i ∈ 1:4
-    local d, c = evaluate_depths(Q[i], B[i], Ks[i], iF[i])
-    # @printf("i = %d, uniform = %.5f, critical = %.5f \n", i, d, c)
-    append!(d_solutions, d)
-    append!(c_solutions, c)
-end
-
-
-@testset "evaluate_depths_new" begin
-    @test evaluate_depths_new(Q[1], B[1], Ks[1], iF[1]) ≈ (d_solutions[1], c_solutions[1])
-    @test evaluate_depths_new(Q[2], B[2], Ks[2], iF[2]) ≈ (d_solutions[2], c_solutions[2])
-    @test evaluate_depths_new(Q[3], B[3], Ks[3], iF[3]) ≈ (d_solutions[3], c_solutions[3])
-    @test evaluate_depths_new(Q[4], B[4], Ks[4], iF[4]) ≈ (d_solutions[4], c_solutions[4])
-end
 

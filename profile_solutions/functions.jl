@@ -1,26 +1,90 @@
-@views function evaluate_depths(Q, B, L, Ks, iF)
+@views function evaluate_depths(Q::Float64, B::Float64, Ks::Float64, iF::Float64)
     # Find the normal depth from the formula above, it is an implicit formula, so adopt an iterative procedure:
-    Qnew = 0.0; tol = 1.0e-4; res = 0.1; d = 1.0; # initial guess for the depth [m]
-    initial_res = Q - B * d * Ks * Hyd_radius(B,d)^(2/3) * iF^(1/2);
-    max_iter = 1000 # maximum number of iterations
-    n = 0
-    while abs(res) >= tol 
-        Qnew = B * d * Ks * Hyd_radius(B,d)^(2/3) * iF^(1/2)
-        res = Q - Qnew;
-        increment = res/initial_res*0.1;
-        if res > 0 # so the depth is too small
+    Qnew = 0.0;                                 # initialize discharge
+    d = 1.0;                                    # initial guess for the depth [m]
+    initial_res = Q - Q_formula(B, d, Ks, iF)   # save the initial residual
+    max_iter = 10000                             # maximum number of iterations
+    n = 0                                       # iteration counter
+    tol = 1.0e-5; res = 0.1                     # tolerance and iniatalize the residual
+    while abs(res) ≥ tol 
+        Qnew = Q_formula(B, d, Ks, iF); res = Q - Qnew;     # evaluate discharghe with the new d
+        increment = res/initial_res*0.01;                    # increment toward the solution
+        if res > 0          # the depth is too small
             d += increment; # increase the depth
-        else
+        else                # the depth is too high
             d -= increment; # decrease the depth
         end
-        n += 1 
-        if n > max_iter
+        n += 1                                              # step
+        # @printf("n = %d, d = %.5f \n", n, d)
+        if n > max_iter                                     # control condition (avoid infinite cicle)
             error("Maximum number of iterations reached")
         end
     end
-    c = (Q^2/(9.81*B^2))^(1/3)
+    c = Critical_d(Q, B)                                    # evaluate the critical depth
     return d, c
-end #function
+end 
+
+# Vectorial form
+@views function evaluate_depths(Q::Float64, B::Vector{Float64}, Ks::Vector{Float64}, iF::Vector{Float64})
+    N = length(IF)
+    d_vec = Float64[]; c_vec = Float64[]
+    for n ∈ 1:N
+        # Find the normal depth from the formula above, it is an implicit formula, so adopt an iterative procedure:
+        Qnew = 0.0;                                 # initialize discharge
+        d = 1.0;                                    # initial guess for the depth [m]
+        initial_res = Q - Q_formula(B[n], d, Ks[n], iF[n])   # save the initial residual
+        max_iter = 10000                             # maximum number of iterations
+        m = 0                                       # iteration counter
+        tol = 1.0e-5; res = 0.1                     # tolerance and iniatalize the residual
+        while abs(res) ≥ tol 
+            Qnew = Q_formula(B[n], d, Ks[n], iF[n]); res = Q - Qnew;     # evaluate discharghe with the new d
+            @infiltrate false
+            increment = res/initial_res*0.01;                    # increment toward the solution
+            if res > 0          # the depth is too small
+                d += increment; # increase the depth
+            else                # the depth is too high
+                d -= increment; # decrease the depth
+            end
+            m += 1                                              # step
+            if m > max_iter                                     # control condition (avoid infinite cicle)
+                error("Maximum number of iterations reached")
+            end
+            # @printf("iter = %d \n", m)
+        end
+        c = Critical_d(Q, B[n])                                    # evaluate the critical depth
+
+        append!(d_vec, d)
+        append!(c_vec, c)
+    end
+
+    return d_vec, c_vec
+end 
+
+# scalar form with bisection
+@views function evaluate_depths_b(goal::Float64, B::Float64, Ks::Float64, iF::Float64)
+    # same as before but using bisection method (convergence guaranteed)
+    dL = 0.01; dR = 10; d = 0.5*(dL+dR) # meters
+    QL = Q_formula(B, dL, Ks, iF); δQL = QL - goal
+    QR = Q_formula(B, dR, Ks, iF); δQR = QR - goal
+    if (δQL * δQR > 0) # check the initialization
+        error("Increase the initial range of depths (bisection)")
+    end
+    Q  = Q_formula(B, d,  Ks, iF); res = goal - Q;
+    max_iter = 100; tol = 1.e-5; n = 0
+    while abs(res) > tol
+        n > max_iter && error("Maximum number of iterations reached (bisection)")
+        n += 1
+        if (res > 0)  # Q is too small, d must increase
+            dL = d; QL = Q
+        else
+            dR = d; QR = Q
+        end
+        d = 0.5*(dL+dR); Q = Q_formula(B, d, Ks, iF)
+        res = goal - Q
+    end
+    c = Critical_d(Q, B) 
+    return d, c
+end
 
 @views function build_bed!(z, x, dx, iF, n_points)
     # build the bed of the channel, the idea is to have always positive z coordinates, and locate
@@ -178,3 +242,5 @@ Spinta(Q, B, d) = 500*9.81*B*d^2 + 1000*Q^2/(B*d)
 Energy(Q, B, d, g) = d + Q^2/(2*g*(B*d)^2)
 Hyd_radius(B, d) = (B*d)/(2*d + B)
 dEdx(iF, Q, B, d, Ks) = iF - ( Q^2 / (Ks^2 * B^2 * d^2) * Hyd_radius(B,d)^(-4/3) )
+Q_formula(B, d, Ks, iF) = B * d * Ks * Hyd_radius(B,d)^(2/3) * iF^(1/2);
+Critical_d(Q, B) = (Q^2/(9.81*B^2))^(1/3)
