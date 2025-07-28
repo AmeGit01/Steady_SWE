@@ -81,7 +81,7 @@ function bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx)
 end # bed_construction
 
 
-@views function main_E_solver(Q, N, B_v, KS, IF)
+@views function main_H_solver(Q, N, B_v, KS, IF)
 
     # I have to make the code working also for changing bed elevation, so the 
     # "position" of the reaches can change, i.e. the position of the passage 
@@ -122,37 +122,30 @@ end # bed_construction
     @infiltrate false
     @printf("Number of style changes is %d so there are %d reaches. \n", n_changes, n_reaches)
 
-
-    # evaluate the BC for each reach (considered separately), so that to impose them internally where requested
-    EL = zeros(n_reaches); dL = zeros(n_reaches) # left boundary condition for the energy
-    ER = zeros(n_reaches); dR = zeros(n_reaches) # right boundary condition for the energy
-
-    EL[1]         = Energy(Q, B_v[1],         d_uniform[1],         g); 
+    HL = zeros(n_reaches); dL = zeros(n_reaches) # left boundary condition for the total head
+    HR = zeros(n_reaches); dR = zeros(n_reaches) # right boundary condition for the total head
+    
+    HL[1]         = Head(Q, B_v[1], Z[1],  d_uniform[1],   g); 
     dL[1]         = d_uniform[1]  # water elevation at the left boundary [m]
 
-    ER[n_reaches] = Energy(Q, B_v[end], d_uniform[end], g); 
+    HR[n_reaches] = Head(Q, B_v[end], Z[end], d_uniform[end], g); 
     dR[n_reaches] = d_uniform[end] # water elevation at the right boundary [m]
 
     m = 2
     for n_rea in ch_loc
         discriminant = subcritical[n_rea] - subcritical[n_rea-1] # check if the reach is subcritical or supercritical
         if discriminant == 0 || discriminant == +1
-            EL[m]   = Energy(Q, B_v[n_rea],   d_uniform[n_rea],   g); dL[m]   = d_uniform[n_rea] # if the reach is subcritical, use the uniform depth
-            ER[m-1] = Energy(Q, B_v[n_rea-1], d_uniform[n_rea-1], g); dR[m-1] = d_uniform[n_rea]
+            HL[m]   = Head(Q, B_v[n_rea],   Z[n_rea],   d_uniform[n_rea],   g); dL[m]   = d_uniform[n_rea] # if the reach is subcritical, use the uniform depth
+            HR[m-1] = Head(Q, B_v[n_rea-1], Z[n_rea-1], d_uniform[n_rea-1], g); dR[m-1] = d_uniform[n_rea]
         elseif discriminant == -1
-            EL[m]   = Energy(Q, B_v[n_rea],   d_critical[n_rea], g);   dL[m]   = d_critical[n_rea] # if the reach is supercritical, use the critical depth
-            ER[m-1] = Energy(Q, B_v[n_rea-1], d_critical[n_rea-1], g); dR[m-1] = d_critical[n_rea-1] # if the previous reach is supercritical, use the critical depth
+            HL[m]   = Head(Q, B_v[n_rea],   Z[n_rea],   d_critical[n_rea],   g); dL[m]   = d_critical[n_rea] # if the reach is supercritical, use the critical depth
+            HR[m-1] = Head(Q, B_v[n_rea-1], Z[n_rea-1], d_critical[n_rea-1], g); dR[m-1] = d_critical[n_rea-1] # if the previous reach is supercritical, use the critical depth
         else
             error("Discriminant must be either 0, -1, or 1")
         end
         m += 1
     end
 
-    # Print the BC for checking purposes
-    for n_rea in 1:n_reaches
-        @printf("Reach %d: Left E BC = %.4f m, Right E BC = %.4f m \n", n_rea, EL[n_rea], ER[n_rea])
-        @printf("Reach %d: Left d BC = %.4f m, Right d BC = %.4f m \n", n_rea, dL[n_rea], dR[n_rea])
-    end 
 
     # ------------------------- INTEGRATION ----------------------------- 
     # NB: here we have to solve for E and immediately evaluate the depths from the energy
@@ -160,7 +153,7 @@ end # bed_construction
     # Solve the energy equation from left to right (downward)
     # here we have to solve the supercritical reaches, starting from the left boundary and
     # going on until reaching the critical state
-    e_dw   = zeros(N)
+    H_dw   = zeros(N)
     d_fast = zeros(N) # depth from the downward energy
     ch_loc_dw = copy(ch_loc)
     insert!(ch_loc_dw, 1, 1)
@@ -179,25 +172,27 @@ end # bed_construction
 
         # set the beginning of the reach
         n = n_rea + 1
-        e_dw[n] = EL[m]
+        H_dw[n] = HL[m]
         d_fast[n] = dL[m]
-        @printf("Imposed BC: depth = %.4f m,  energy = %.4f m \n", d_fast[n], e_dw[n])
+        @printf("Imposed BC: depth = %.4f m,  energy = %.4f m \n", d_fast[n], H_dw[n])
 
         while n < N # evaluate energy for downstream points
             n += 1
             # Forward Euler
-            e_dw[n] = e_dw[n-1] + dX[n-1] * dEdx(IF[n-1], Q, B_v[n-1], d_fast[n-1], KS[n-1])
+            H_dw[n] = H_dw[n-1] + dX[n-1] * dHdx(Q, B_v[n-1], d_fast[n-1], KS[n-1])
             # evaluate uniform depth (supercritical)
-            d_fast[n] = analytical_E2d(d_critical[n], e_dw[n], Q, B_v[n], style="supercritical")
+
+            # attention
+            d_fast[n] = analytical_E2d(d_critical[n], H_dw[n]-Z[n], Q, B_v[n], style="supercritical")
+            
             # when the criticality is reached, than stop the evaluation:
-            @infiltrate false
             d_fast[n] == d_critical[n] && break
 
             # @printf("n = %d, e_dw[n] = %f, d_fast[n] = %.4f, X[n] = %.2f \n", n, e_dw[n], d_fast[n], X[n])
         end
     end
 
-    y_limits = (min(minimum(Z), minimum(e_dw)) - 0.5, max(maximum(Z), maximum(Z+d_fast)) + 0.5) # y limits for the plots
+    y_limits = (min(minimum(Z), minimum(H_dw)) - 0.5, max(maximum(Z), maximum(Z+d_fast)) + 0.5) # y limits for the plots
     p1 = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel", legend=:topright,
         grid=true, xlims=(X[begin]-10, X[end]+10), ylims=y_limits, color="black", linewidth=2,
         size=(1400, 700))
@@ -211,7 +206,7 @@ end # bed_construction
     # Solve the energy equation from right to left (upward)
     # here we have to solve the subcritical reaches, starting from the right boundary and
     # going on until reaching the critical state
-    e_uw   = zeros(N) 
+    H_uw   = zeros(N) 
     d_slow = zeros(N) 
     ch_loc_uw = copy(ch_loc)
     append!(ch_loc_uw, N+1)
@@ -232,16 +227,19 @@ end # bed_construction
 
         # set the end of the reach
         n = n_rea
-        e_uw[n] = ER[m]
+        H_uw[n] = HR[m]
         d_slow[n] = dR[m] # initial guess for the depth
-        @printf("Imposed BC: depth = %.4f m,  energy = %.4f m \n", d_slow[n], e_uw[n])
+        @printf("Imposed BC: depth = %.4f m,  energy = %.4f m \n", d_slow[n], H_uw[n])
 
         while n > 1
             n -= 1
             # Forward Euler (from dowstream to upstream)
-            e_uw[n] = e_uw[n+1] - dX[n] * dEdx(IF[n+1], Q, B_v[n+1], d_slow[n+1], KS[n+1])
+            H_uw[n] = H_uw[n+1] - dX[n] * dHdx(Q, B_v[n+1], d_slow[n+1], KS[n+1])
             # evaluate uniform depth (subcritical)
-            d_slow[n] = analytical_E2d(d_critical[n], e_uw[n], Q, B_v[n], style="subcritical")
+
+            # attention
+            d_slow[n] = analytical_E2d(d_critical[n], H_uw[n]-Z[n], Q, B_v[n], style="subcritical")
+            
             # when the criticality is reached, than stop the evaluation:
             d_slow[n] == d_critical[n] && break
 
@@ -266,7 +264,7 @@ end # bed_construction
 
     # --------------------------- PLOTS -----------------------------
 
-    y_limits = (min(minimum(Z), minimum(e_dw)) - 0.5, max(maximum(Z), maximum(Z+d)) + 0.5) # y limits for the plots
+    y_limits = (min(minimum(Z), minimum(H_dw)) - 0.5, max(maximum(Z), maximum(Z+d)) + 0.5) # y limits for the plots
     p1 = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel", legend=:topright,
         grid=true, xlims=(X[begin]-10, X[end]+10), ylims=y_limits, color="black", linewidth=2,
         size=(1400, 700))
@@ -301,11 +299,11 @@ end #main_E_solver
 
 # ---------------------- PROBLEM DEFINITION -----------------------
 n_reaches = 3               # number of reaches in the channel
-L  = [500.0, 1000.0, 8000.0, 500.0]       # length of the channel [m]
+L  = [500.0, 1000.0]       # length of the channel [m]
 Q  = 60.0                  # discharge [m^3/s] Q = Ω Ks R^2/3 iF^1/2
-B  = [50.0, 50.0, 50.0, 50.0]           # width of the channel [m]
-Ks = [40.0, 40.0, 50.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
-iF = [0.001, 0.01, 0.0001, 0.001]          # slope of the channel
+B  = [50.0, 50.0]           # width of the channel [m]
+Ks = [40.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
+iF = [0.001, 0.05]          # slope of the channel
 dx = 1.0                   # distance between the points of the channel [m]
 g  = PARAMETERS.gravit             # gravity acceleration [m/s^2]
 
@@ -318,6 +316,5 @@ dX  = Float64[]
 
 dX, N = bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx)
 
-main_E_solver(Q, N, B_v, KS, IF)
-
+main_H_solver(Q, N, B_v, KS, IF)
 

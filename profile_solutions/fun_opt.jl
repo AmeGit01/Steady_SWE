@@ -86,8 +86,10 @@ end
 end
 
 Spinta(Q, B, d) = 500*9.81*B*d^2 + 1000*Q^2/(B*d)
-Energy(Q, B, d, g) = d + Q^2/(2*g*(B*d)^2)
+Energy(Q, B, d, g)  = d + Q^2/(2*g*(B*d)^2)
+Head(Q, B, z, d, g) = (z+d) + Q^2/(2*g*(B*d)^2)
 Hyd_radius(B, d) = (B*d)/(2*d + B)
 dEdx(iF, Q, B, d, Ks) = iF - ( Q^2 / (Ks^2 * B^2 * d^2) * Hyd_radius(B,d)^(-4/3) )
+dHdx(Q, B, d, Ks)     =    - ( Q^2 / (Ks^2 * B^2 * d^2) * Hyd_radius(B,d)^(-4/3) )
 Q_formula(B, d, Ks, iF) = B * d * Ks * Hyd_radius(B,d)^(2/3) * iF^(1/2);
 Critical_d(Q, B) = (Q^2/(9.81*B^2))^(1/3)
