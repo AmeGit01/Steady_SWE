@@ -3,18 +3,19 @@
     Qnew = 0.0;                                 # initialize discharge
     d = 1.0;                                    # initial guess for the depth [m]
     initial_res = Q - Q_formula(B, d, Ks, iF)   # save the initial residual
-    max_iter = 1000                             # maximum number of iterations
+    max_iter = 10000                             # maximum number of iterations
     n = 0                                       # iteration counter
     tol = 1.0e-5; res = 0.1                     # tolerance and iniatalize the residual
     while abs(res) ≥ tol 
         Qnew = Q_formula(B, d, Ks, iF); res = Q - Qnew;     # evaluate discharghe with the new d
-        increment = res/initial_res*0.1;                    # increment toward the solution
+        increment = res/initial_res*0.01;                    # increment toward the solution
         if res > 0          # the depth is too small
             d += increment; # increase the depth
         else                # the depth is too high
             d -= increment; # decrease the depth
         end
         n += 1                                              # step
+        # @printf("n = %d, d = %.5f \n", n, d)
         if n > max_iter                                     # control condition (avoid infinite cicle)
             error("Maximum number of iterations reached")
         end
