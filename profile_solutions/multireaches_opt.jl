@@ -54,6 +54,20 @@ function bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx)
         scale[n_rea, 1] = scale[n_rea-1, 1] + L[n_rea-1]                      # scale vector for the x coordinates
     end
 
+    # Add steps
+    n_step = collect(elements.steps_positions)
+    h_step = collect(elements.steps_high)
+    m = 1
+    for i ∈ n_step
+        #to be finished
+        j = 1
+        while j ≤ i
+            scale[j, 2] += h_step[m]
+            j += 1
+        end
+        m += 1
+    end
+
     println("Scale vector for X: ", scale[:, 1])
     println("Scale vector for Z: ", scale[:, 2])
 
@@ -71,7 +85,6 @@ function bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx)
     pbed = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel",
         grid=true, xlims=(X[begin]-10, X[end]+10), ylims=(minimum(Z)-0.05, maximum(Z)+0.05),
         color="black", linewidth=2, size=(1000, 400)); #display(pbed)
-
 
     px   = plot(X, label="X coordinates", xlabel="Point index", ylabel="X [m]",
         title="X coordinates of the points", grid=true, color="blue",
@@ -192,6 +205,7 @@ end # bed_construction
         end
     end
 
+    #=
     y_limits = (min(minimum(Z), minimum(H_dw)) - 0.5, max(maximum(Z), maximum(Z+d_fast)) + 0.5) # y limits for the plots
     p1 = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel", legend=:topright,
         grid=true, xlims=(X[begin]-10, X[end]+10), ylims=y_limits, color="black", linewidth=2,
@@ -201,7 +215,7 @@ end # bed_construction
     p1 = plot!(X, Z + d_critical, label="Critical depth", xlabel="x [m]", ylabel="z [m]",
         title="Water elevation in the channel", grid=true, color="gray", linewidth=2, linestyle=:dash)
     display(plot(p1, size=(1400, 500)))
-
+    =#
 
     # Solve the energy equation from right to left (upward)
     # here we have to solve the subcritical reaches, starting from the right boundary and
@@ -276,11 +290,11 @@ end # bed_construction
         title="Water elevation in the channel", grid=true, color="green", linewidth=2)
     p1 = plot!(X, Z + d_critical, label="Critical depth", xlabel="x [m]", ylabel="z [m]",
         title="Water elevation in the channel", grid=true, color="gray", linewidth=2, linestyle=:dash)
-    display(plot(p1, size=(1400, 500)))
+    # display(plot(p1, size=(1400, 500)))
 
-    #=
+    
     p2 = plot(X, Z, label="Bed", xlabel="x [m]", ylabel="z [m]", title="Bed of the channel", legend=:topright,
-        grid=true, xlims=(950, 3050), ylims=(Z[3000]-1, Z[1000]+d_slow[100]+2), color="black", linewidth=2,
+        grid=true, xlims=(975, 1025), ylims=(0.5, 2.5), color="black", linewidth=2,
         size=(1400, 700))
     p2 = plot!(X, Z + d_fast, label="Supercritical depths", xlabel="x [m]", ylabel="z [m]",
         title="Water elevation in the channel", grid=true, color="red", linewidth=2)
@@ -290,8 +304,7 @@ end # bed_construction
         title="Water elevation in the channel", grid=true, color="green", linewidth=2)
     p2 = plot!(X, Z + d_critical, label="Critical depth", xlabel="x [m]", ylabel="z [m]",
         title="Water elevation in the channel", grid=true, color="gray", linewidth=2, linestyle=:dash)
-    =#
-    # display(plot(p1, p2, layout=(2,1), size=(1400, 800)))
+    display(plot(p1, p2, layout=(2,1), size=(1400, 800)))
     
     return nothing
 end #main_E_solver
@@ -299,13 +312,16 @@ end #main_E_solver
 
 # ---------------------- PROBLEM DEFINITION -----------------------
 n_reaches = 3               # number of reaches in the channel
-L  = [500.0, 1000.0]       # length of the channel [m]
+L  = [1000.0, 1000.0]       # length of the channel [m]
 Q  = 60.0                  # discharge [m^3/s] Q = Ω Ks R^2/3 iF^1/2
 B  = [50.0, 50.0]           # width of the channel [m]
 Ks = [40.0, 40.0]           # Strickler coefficient [m^(1/3)/s] Ks = 1/n
-iF = [0.001, 0.05]          # slope of the channel
+iF = [0.001, 0.001]          # slope of the channel
 dx = 1.0                   # distance between the points of the channel [m]
-g  = PARAMETERS.gravit             # gravity acceleration [m/s^2]
+elements = (
+    steps_positions = [1], # position 1 is from reach 1 and reach 2
+    steps_high = [0.2]       # meters
+)
 
 B_v = Float64[]                                        # vector of widths
 KS  = Float64[]                                        # vector of Strickler coefficients
@@ -314,7 +330,7 @@ X   = Float64[]
 Z   = Float64[]
 dX  = Float64[]
 
-dX, N = bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx)
+dX, N = bed_construction!(B_v, KS, IF, X, Z, L, B, Ks, iF, dx); 
 
 main_H_solver(Q, N, B_v, KS, IF)
 
