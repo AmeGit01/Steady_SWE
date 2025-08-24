@@ -37,6 +37,8 @@ end
     return h
 end 
 
-Q_formula(B, h, Ks, iF) = B * h * Ks * Hyd_radius(B,h)^(2/3) * iF^(1/2);
-Hyd_radius(B, h) = (B*h)/(2*h + B)
+Q_formula(B::Float64, h::Float64, Ks::Float64, iF::Float64) = B * h * Ks * Hyd_radius(B,h)^(2/3) * iF^(1/2);
+Q_formula(B::Float64, h::Vector{Float64}, Ks::Float64, iF::Float64) = B .* h .* Ks .* Hyd_radius(B,h).^(2/3) .* iF^(1/2);
+Hyd_radius(B::Float64, h::Float64) = (B*h)/(2*h + B)
+Hyd_radius(B::Float64, h::Vector{Float64}) = (B.*h)./(2 .*h .+ B)
 Critical_d(Q, B) = (Q^2/(9.81*B^2))^(1/3)
