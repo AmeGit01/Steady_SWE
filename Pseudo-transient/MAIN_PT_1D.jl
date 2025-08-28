@@ -11,8 +11,7 @@ include("functions_PT_1D.jl")
 
 const PARAMETERS = (
     gravit = 9.81,     # m/s^2
-    ρ      = 1000.0,   # kg/m^3
-    useless = 1.0
+    ρ      = 1000.0   # kg/m^3
 )
 
 @views function Pseudotransient_1D()
