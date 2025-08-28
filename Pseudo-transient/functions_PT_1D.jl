@@ -11,6 +11,12 @@
     return nothing
 end
 
+U(h, Ks, iF) = @. Ks * h^(2/3) * iF^(1/2)
+
+
+
+
+#=
 @views function evaluate_depth(Q::Float64, B::Float64, Ks::Float64, iF::Float64)            # to be improoved
     # Find the normal depth from the formula above, it is an implicit formula, so adopt an iterative procedure:
     Qnew = 0.0;                                 # initialize discharge
@@ -42,3 +48,4 @@ Q_formula(B::Float64, h::Vector{Float64}, Ks::Float64, iF::Float64) = B .* h .* 
 Hyd_radius(B::Float64, h::Float64) = (B*h)/(2*h + B)
 Hyd_radius(B::Float64, h::Vector{Float64}) = (B.*h)./(2 .*h .+ B)
 Critical_d(Q, B) = (Q^2/(9.81*B^2))^(1/3)
+=#

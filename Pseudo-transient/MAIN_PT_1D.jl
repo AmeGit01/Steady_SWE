@@ -16,71 +16,73 @@ const PARAMETERS = (
 
 @views function Pseudotransient_1D()
     # Physical parameters
-    Q = 20.0                # discharge [m^3/s]
-    B = 10.0                # channel width [m]
     Ks = 30.0               # Strickler coefficient [m^(1/3)/s]
     iF = 0.001              # channel slope [-]
     L = 1000.0              # channel length [m]
-    n_points = 10           # number of points
+    n_points = 101           # number of points
     g = PARAMETERS.gravit
     ρ = PARAMETERS.ρ
-    γ = g * ρ               # specific weight of water [N/m^3]
 
     # Numerical parameters
-    dx = L/(n_points)                   # space step [m]
-    xb = collect(dx/2:dx:L-dx/2)        # coordinate of the barycenters  (n_points)
-    xi = collect(0:dx:L)                # coordinate of the interfaces (n_points+1)
-    ρ_hat_bar = 1.0                     # parameter defining the pseudo-transient method
-    tol = 1.e-8                         # tolerance for the convergence
-    max_iter = 1000                     # maximum number of iterations
+    dx = L/(n_points-1)                   # space step [m]
+    x = collect(0:dx:L)        # coordinate of the barycenters  (n_points)
+    ρ_hat = 1.0                     # parameter defining the pseudo-transient method
 
     # Initialize arrays
-    b     = zeros(n_points)                # bed elevation [m] BARYCENTERS
-    h     = ones(n_points)                 # water depth [m]  BARYCENTERS (INITIAL VALUES ALREADY INITIALIZED)
-    q     = zeros(n_points+1)
-    u     = zeros(n_points+1)
-    iF_v  = ones(n_points+1) * iF
-    hm    = zeros(n_points+1)
-    hgost = zeros(n_points+1)
-    dudx  = zeros(n_points)
+    b     = zeros(n_points)                # bed elevation [m] 
+    h     = ones(n_points)                 # water depth [m] 
+    u     = ones(n_points)
 
     # Build the bed
-    build_bed!(b, xb, iF, n_points)
+    build_bed!(b, x, iF, n_points)
 
-    # Evaluate the normal depth for the selected discharge
-    hL = evaluate_depth(Q, B, Ks, iF)
+    # Evaluate the right velocity for the selected depth
+    hl = hr = 1.2            # left water depth [m] (boundary condition)
+    ul = ur = U(hl, Ks, iF)   # left velocity [m/s] (boundary condition)
 
     # set the initial conditions
-    h[1] = hL; h_old = copy(h)
-    hm[1] = h_old[1]; hm[end] = h_old[end]
-    hm[2:end-1] .= 0.5 .* (h_old[1:end-1] .+ h_old[2:end])
+    h[1] = hl; u[1] = ul
+    h[end] = hr; u[end] = ur
+    hnew  = copy(h); unew  = copy(u)
+    hstar = copy(h); ustar = copy(u)
 
-    q .= Q_formula(B, hm, Ks, iF); q_old = copy(q)
-    # q .= Q;    q_old = copy(q)
-    # u .= Q./h
-
+    resh = zeros(n_points-2)
+    resu = zeros(n_points-2)
+    p    = zeros(n_points)
+    m    = zeros(n_points)
+    max_iter = 1000                     # maximum number of iterations
+    tol = 1.e-8                         # tolerance for the convergence
     iter = 1; err = 2tol
+    _ρdx = 1/ρ_hat/dx
     while err ≥ tol && iter ≤ max_iter
-        h[2:end] .= h[2:end] .- ρ / ρ_hat_bar / dx .* diff(q[2:end])
-        @infiltrate false
-        hm[1] = h[1]; hm[end] = h[end]
-        hm[2:end-1] .= 0.5 .* (h[1:end-1] .+ h[2:end])
-        u .= q ./ hm
-        dudx .= diff(u) ./ dx
-        hgost[1:end-1] .= h_old; hgost[end] = h_old[end] 
-        q[2:end] .= q[2:end] .- 1/ρ_hat_bar .*( ρ .* q[2:end] .* dudx .-
-                    γ .* hm[2:end] .* ( iF_v[2:end] .- diff(hgost) .- 
-                    u[2:end].^2 ./(Ks^2 .* hm[2:end].^4 .* hm[2:end].^(-3)) ) )
-        @infiltrate false
+        p .= 0.5*(u .+ abs.(u)) ./ u
+        m .= 0.5*(u .- abs.(u)) ./ u
+        hstar[2:end-1] .= h[2:end-1]     .- _ρdx .* p[2:end-1] .*( h[2:end-1]./u[2:end-1] .*    diff(u[1:end-1]) 
+                                         .+    diff(h[1:end-1])  )
+        hnew[2:end-1]  .= hstar[2:end-1] .- _ρdx .* m[2:end-1] .*( h[2:end-1]./u[2:end-1] .* ( -diff(u[1:end-1]) ) 
+                                         .+ ( -diff(h[1:end-1])) )
+        ustar[2:end-1] .= u[2:end-1]     .- _ρdx .* p[2:end-1] .*( u[2:end-1]/g .*    diff(u[1:end-1])   .+    diff(h[1:end-1])   .+ iF 
+                    .- u[2:end-1].^2 ./(Ks^2 .* h[2:end-1].^(4/3)) )
+        unew[2:end-1]  .= ustar[2:end-1] .- _ρdx .* m[2:end-1] .*( u[2:end-1]/g .* ( -diff(u[1:end-1]) ) .+ ( -diff(h[1:end-1]) ) .+ iF 
+                    .- u[2:end-1].^2 ./(Ks^2 .* h[2:end-1].^(4/3)) )
+
+        @infiltrate 
         
-        any(h==NaN) && error("h is NaN")
-        any(q==NaN) && error("q is NaN")
+        if iter ≥ 449
+            @infiltrate false
+        end
+
+        any(hnew == NaN) && error("h is NaN")
+        any(unew == NaN) && error("u is NaN")
+
         # Convergence check
-        err = max(maximum(abs.(h .- h_old)), maximum(abs.(q .- q_old)))
+        h = hnew; u = unew
+        resh = abs.( h[2:end-1]./u[2:end-1] .* diff(u[1:end-1]) .+ diff(h[1:end-1]) )
+        resu = abs.( u[2:end-1]/g .* diff(u[1:end-1]) .+ diff(h[1:end-1]) .- iF 
+                     .+ u[2:end-1].^2 ./(Ks^2 .* h[2:end-1].^(4/3)) )
+        err = max(maximum(resh), maximum(resu))
         @printf("iter = %d, err = %.5e \n", iter, err)
 
-        # Update the solutions
-        h_old .= h; q_old .= q
         iter += 1
     end
 end

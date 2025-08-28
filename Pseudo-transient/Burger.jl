@@ -63,7 +63,9 @@ end
         end
 
         # Convergence check
-        if iter%15 == 0
+        if iter%5 == 0
+            @infiltrate
+            # the residual should not contain ρ_hat, check it!
             res .= abs.( 1/ρ_hat/dt * (qnew[2:end] - qold[2:end]) + 1/ρ_hat/dx * (f(q[2:end]) - f(q[1:end-1])) )
             err = maximum(res)
             @printf("iter = %d, err = %.5e \n", iter, err)     
@@ -139,7 +141,7 @@ end
 @views function Burger_1D(solutor, saving, loading, IC; n_vis=5) 
 
     # Numerics
-    Nx = 500
+    Nx = 100
     xl, xr = -1.0, 1.0
     dx = (xr - xl) / Nx
     x = collect(xl+0.5*dx:dx:xr-0.5*dx)
@@ -223,8 +225,8 @@ end
 # 3 = Pseudotransient
 solutor = 3
 saving = false
-loading = true
-IC = "shock" # "shock" or "rarefaction"
+loading = false
+IC = "rarefaction" # "shock" or "rarefaction"
 Burger_1D(solutor, saving, loading, IC, n_vis=1000)
 
 
