@@ -3,9 +3,23 @@ using IJulia, Plots, Printf, LinearAlgebra, BenchmarkTools, Infiltrator, JLD2, S
 
 # functions
 f(q) = @. 0.5 * q^2
-function eig(q)
+residual(q, ξ) = eig(q) - ξ
+
+function dresidual(q, ξ)
+    ε = 1.e-7
+    dres = @. (residual(q+ε, ξ) - residual(q-ε, ξ)) / (2ε)
+    return dres
+end
+
+function eig(q::Vector{Float64}) # dt definition
     ε = 1.e-7
     out = similar(q)
+    out = @. (f(q+ε) - f(q-ε)) / (2ε)
+    return out
+end
+
+function eig(q::Float64) # dt definition
+    ε = 1.e-7
     out = @. (f(q+ε) - f(q-ε)) / (2ε)
     return out
 end
@@ -13,8 +27,6 @@ end
 @views function Lax_Friedrics!(q, dtdx, ql, qr)
     Nx   = length(q)
     qnew = zeros(Nx)
-    fm   = zeros(Nx)
-    fp   = zeros(Nx)
     for i ∈ 1:Nx
         if i == 1
             fm = 0.5*(f(q[i])   + f(ql)  ) - 0.5*dtdx*(q[i]   - ql  ) 
@@ -51,7 +63,7 @@ end
         end
 
         # Convergence check
-        if iter%25 == 0
+        if iter%15 == 0
             res .= abs.( 1/ρ_hat/dt * (qnew[2:end] - qold[2:end]) + 1/ρ_hat/dx * (f(q[2:end]) - f(q[1:end-1])) )
             err = maximum(res)
             @printf("iter = %d, err = %.5e \n", iter, err)     
@@ -60,6 +72,68 @@ end
         iter += 1         
         q .= qnew
     end
+end
+
+@views function Godonov!(q, dtdx, ql, qr)
+    Nx   = length(q)
+    qnew = zeros(Nx)
+    for i ∈ 1:Nx
+        if i==1
+            qm = exact_RS(ql,   q[i],   0.0); fm = f(qm)
+            qp = exact_RS(q[i], q[i+1], 0.0); fp = f(qp)
+        elseif i==Nx
+            qm = exact_RS(q[i-1], q[i], 0.0); fm = f(qm)
+            qp = exact_RS(q[i],   qr,   0.0); fp = f(qp)
+        else
+            qm = exact_RS(q[i-1], q[i], 0.0); fm = f(qm)
+            qp = exact_RS(q[i], q[i+1], 0.0); fp = f(qp)
+        end
+        qnew[i] = q[i] - dtdx * (fp - fm)
+    end
+    q .= qnew
+end
+
+@views function exact_RS(ql, qr, ξ)
+    if (eig(ql) ≤ eig(qr)) # rarefaction
+        if (ξ < eig(ql))
+            q = ql
+        elseif (ξ > eig(qr))
+            q = qr
+        else
+            q = Newton(ξ)
+        end
+    else # shock
+        s = (f(qr) - f(ql)) / (qr - ql)
+        if (ξ < s)
+            q = ql
+        else
+            q = qr
+        end
+    end
+    return q
+end
+
+@views function Newton(ξ)
+    q = ξ
+    imax = 100; tol = 1.e-13; klsg = 11
+    for i ∈ 1:imax
+        i==imax && error("Newton did not converge")
+        res = residual(q, ξ)
+        abs(res) < tol && break
+        dres = dresidual(q, ξ)
+        dq = - res / dres
+        d = 1.0
+        for ii ∈ 1:klsg
+            ii == klsg && error("Newton line search did not converge")
+            if (abs(resdual(q + d*dq, ξ)) < abs(res))
+                q += d*dq
+                break
+            else
+                d = d/2.0
+            end
+        end
+    end
+    return q
 end
 
 @views function Burger_1D(solutor, saving, loading, IC; n_vis=5) 
@@ -106,12 +180,12 @@ end
         end
         time ≥ t_end && break
 
+        dtdx = dt/dx
         if (solutor==1)
-            
+            Godonov!(q, dtdx, ql, qr)
         elseif (solutor==2)
-            dtdx = dt/dx
             Lax_Friedrics!(q, dtdx, ql, qr)
-        elseif (solutor==2)
+        elseif (solutor==3)
             Pseudotransient_1D!(q, dt, dx, ql)
         end
 
@@ -126,15 +200,11 @@ end
 
     # Load and plot results with reference solution if available
     if loading # with reference solution
-        if IC == "shock"
-            @load "t05_xq_shock.jld2" xx qq
-        elseif IC == "rarefaction"
-            @load "t05_xq_rarefaction.jld2" xx qq
-        end
-        plt = plot(xx, qq, xlabel="x", ylabel="q", title="1D Burger, t = $time", label="Lax-Friedrics")
+        @load "t05_xq_$IC.jld2" xx qq
+        plt = plot(xx, qq, xlabel="x", ylabel="q", title="1D Burger, t = $time", label="Godunov")
         plt = plot!(x, q, xlabel="x", ylabel="q", label="Pseudo-transient")
         display(plt)
-        savefig(plt, "Burger1D_rarefaction.png")
+        savefig(plt, "Burger1D_$IC.png")
     else # without reference solution
         plt = plot(x, q, xlabel="x", ylabel="q", title="1D Burger, t = $time")
         display(plt)
@@ -143,7 +213,7 @@ end
     # Save results
     if saving
         xx, qq = copy(x), copy(q)
-        @save "t05_xq_shock.jld2" xx qq
+        @save "t05_xq_$IC.jld2" xx qq
     end
 end
 
@@ -151,10 +221,10 @@ end
 # 1 = Godononv
 # 2 = Lax-Friedrichs
 # 3 = Pseudotransient
-solutor = 1
+solutor = 3
 saving = false
 loading = true
-IC = "rarefaction" # "shock" or "rarefaction"
+IC = "shock" # "shock" or "rarefaction"
 Burger_1D(solutor, saving, loading, IC, n_vis=1000)
 
 
